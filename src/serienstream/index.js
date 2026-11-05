@@ -9,7 +9,7 @@ const BASE = 'https://serienstream.to';
 // Support both the current card-based search page and the older cover layout.
 function parseSearchResults($) {
     return all($, '.results-group .card, a.show-cover, a.show-card').map(card => {
-        const anchor = card.is('a') ? card : $('a[href]', card).first();
+        const anchor = card.attr('href') ? card : $('a[href]', card).first();
         const rawLink = anchor.attr('href') || '';
         const link = rawLink.startsWith(`${BASE}/`) ? rawLink.slice(BASE.length) : rawLink;
         const title = $('img[alt]', card).first().attr('alt') ||
