@@ -1,6 +1,6 @@
 {
   "name": "German Providers",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Deutsche Quellen für Nuvio – portiert von Bnyro/GermanProviders (CloudStream)",
   "author": "InvalidPandaa",
   "scrapers": [
@@ -172,7 +172,7 @@
       "id": "serienstream",
       "name": "Serienstream",
       "description": "Serien auf Deutsch und im Original von SerienStream (s.to)",
-      "version": "1.0.9",
+      "version": "1.0.10",
       "filename": "providers/serienstream.js",
       "supportedTypes": [
         "tv"
