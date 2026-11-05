@@ -52,3 +52,10 @@ Der SerienStream-Scraper unterstützt Suchtreffer als Cards sowie das bisherige 
 - **Anbieter-Diagnose:** Testfälle für 19 Provider im Manifest, `health.json` und `npm run health` (Live-Tests benötigen `TMDB_API_KEY`).
 
 Die Quellenschnittstellen und die Wiedergabe wurden hier nicht auf einem echten Nuvio-Endgerät überprüft. Captcha-/Browser-Prüfungen und Hoster-Ausfälle werden nicht umgangen.
+
+## Columbo 1.0.10: Zuordnung und Hoster-Diagnose
+
+- Columbo hat die TMDB-ID `873`. TMDB zählt in Staffel 1 sieben reguläre Folgen und führt die beiden Pilotfilme separat; SerienStream zählt beide Pilotfilme als S01E01 und S01E02. Deshalb wird bei Columbo S01E01–S01E07 im SerienStream-Scraper die Episodennummer um 2 verschoben.
+- Die SerienStream-Episodenseite wird einschließlich eines optionalen Sitzungscookies eingelesen. Dieses Cookie wird bei der Hoster-Weiterleitung mitgegeben; fehlt es, funktioniert das bisherige Verhalten weiterhin.
+- Bleibt die Hoster-Weiterleitung bei der SerienStream-Adresse stehen, protokolliert der Scraper einen möglichen Browser-Check beziehungsweise einen nicht verfügbaren Hoster, anstatt einen spielbaren Stream vorzutäuschen.
+- **Einschränkung:** Die korrekte Zuordnung und Cookie-Weitergabe sind mit simulierten Antworten getestet; echte Columbo-Wiedergabe konnte nicht verifiziert werden. CAPTCHAs werden nicht umgangen.
