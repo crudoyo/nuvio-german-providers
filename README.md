@@ -14,7 +14,7 @@ auf allen Plattformen: Android, Android TV, iOS, macOS, Windows.
 In Nuvio in den Plugin-Einstellungen ein Repository mit der **rohen** URL der `manifest.json` hinzufügen:
 
 ```
-https://invalidpandaa.github.io/nuvio-german-providers/manifest.json
+https://raw.githubusercontent.com/crudoyo/nuvio-german-providers/refs/heads/main/manifest.json
 ```
 
 
@@ -39,3 +39,7 @@ https://invalidpandaa.github.io/nuvio-german-providers/manifest.json
 GPL-3.0-or-later. Seiten-Logik nach [Bnyro/GermanProviders](https://github.com/Bnyro/GermanProviders) (GPL-3.0),
 Hoster-Decoder nach [recloudstream/cloudstream](https://github.com/recloudstream/cloudstream) (GPL-3.0).
 Die Plugins hosten keine Inhalte, sie verhalten sich wie ein Browser, der öffentlich erreichbare Seiten aufruft.
+
+## Fork: SerienStream-Suche (1.0.6)
+
+Der SerienStream-Scraper unterstützt Suchtreffer als Cards sowie das bisherige Cover-Layout, probiert bei einem Suchfehler weitere Titel und den bestehenden Slug-Fallback und korrigiert absolute Weiterleitungs-URLs und unbekannte Sprach-IDs. Der Fix ist anhand lokaler Tests geprüft, aber noch nicht als Live-Wiedergabe auf einem Nuvio-Gerät bestätigt. Captchas werden nicht umgangen; die Hoster-Auflösung kann weiterhin fehlschlagen.
