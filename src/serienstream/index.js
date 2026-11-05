@@ -6,18 +6,41 @@ import { bySlug, followRedirect, pickSeries, splitSeasonPath } from './common.js
 
 const BASE = 'https://serienstream.to';
 
+// Support both the current card-based search page and the older cover layout.
+function parseSearchResults($) {
+    return all($, '.results-group .card, a.show-cover, a.show-card').map(card => {
+        const anchor = card.is('a') ? card : $('a[href]', card).first();
+        const rawLink = anchor.attr('href') || '';
+        const link = rawLink.startsWith(`${BASE}/`) ? rawLink.slice(BASE.length) : rawLink;
+        const title = $('img[alt]', card).first().attr('alt') ||
+            $('.card-title, h2, h3', card).first().text().trim();
+        return { link, title };
+    }).filter(item => item.link.startsWith('/serie/') && item.title);
+}
+
+function fullUrl(path) {
+    return /^https?:\/\//i.test(path) ? path : `${BASE}${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
 async function getStreams(tmdbId, mediaType, season, episode) {
     if (mediaType !== 'tv' || season == null || episode == null) return [];
     try {
         const meta = await getMeta(tmdbId, mediaType);
         let series = null;
         for (const q of meta.titles) {
-            const $ = load(await getText(`${BASE}/suche?term=${encodeURIComponent(q)}&tab=shows`, { headers: { Referer: `${BASE}/suche` } }));
-            const items = all($, 'a.show-cover').map(a => ({ link: a.attr('href'), title: $('img', a).attr('alt') }));
-            if ((series = await pickSeries(items, meta, BASE))) break;
+            try {
+                const $ = load(await getText(`${BASE}/suche?term=${encodeURIComponent(q)}&tab=shows`, { headers: { Referer: `${BASE}/suche` } }));
+                if ((series = await pickSeries(parseSearchResults($), meta, BASE))) break;
+            } catch (e) {
+                // An unavailable search endpoint should not prevent the next title or slug fallback.
+                console.error(`[Serienstream] Search for ${q}: ${e.message}`);
+            }
         }
         series = series || await bySlug(BASE, '/serie/', meta);
-        if (!series) return [];
+        if (!series) {
+            console.error(`[Serienstream] No matching series for ${meta.titles.join(' / ')}`);
+            return [];
+        }
         const episodePage = async path => {
             const epUrl = BASE + path;
             // an episode that does not exist answers 404
@@ -25,7 +48,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             // "Provider" links always answer 410
             const links = all($, '.link-wrapper button').filter(b => b.attr('data-provider-name') !== 'Provider').map(b => ({
                 url: b.attr('data-play-url'), lang: b.attr('data-language-label'), langId: b.attr('data-language-id'),
-            }));
+            })).filter(l => l.url);
             return { epUrl, links };
         };
         let page = await episodePage(`${series.link}/staffel-${season}/episode-${episode}`);
@@ -34,11 +57,14 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             if (split) page = await episodePage(split);
         }
         const { epUrl, links } = page;
+        if (!links.length) console.error(`[Serienstream] No provider links on ${epUrl}`);
         // s.to shows a captcha instead of redirecting after ~10 links per IP, so spend links on German first
         // (1 = Deutsch, 3 = Ger-Sub, 2 = Englisch) and only fall back to the next language if nothing played
-        for (const langId of ['1', '3', '2']) {
-            const out = await Promise.all(links.filter(l => l.langId === langId).map(async l => {
-                const embed = await followRedirect(BASE + l.url, epUrl).catch(() => null);
+        const knownLanguageIds = ['1', '3', '2'];
+        for (const langId of [...knownLanguageIds, 'other']) {
+            const eligible = links.filter(l => langId === 'other' ? !knownLanguageIds.includes(l.langId) : l.langId === langId);
+            const out = await Promise.all(eligible.map(async l => {
+                const embed = await followRedirect(fullUrl(l.url), epUrl).catch(() => null);
                 return (await resolveEmbed(embed, epUrl)).map(s => ({
                     name: 'Serienstream', title: `${s.host} · ${l.lang}`, url: s.url, quality: s.quality, headers: s.headers,
                 }));
