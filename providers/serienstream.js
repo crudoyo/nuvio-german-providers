@@ -437,6 +437,18 @@ function bySlug(base, prefix, meta) {
 
 // src/serienstream/index.js
 var BASE = "https://serienstream.to";
+function parseSearchResults($) {
+  return all($, ".results-group .card, a.show-cover, a.show-card").map((card) => {
+    const anchor = card.is("a") ? card : $("a[href]", card).first();
+    const rawLink = anchor.attr("href") || "";
+    const link = rawLink.startsWith(`${BASE}/`) ? rawLink.slice(BASE.length) : rawLink;
+    const title = $("img[alt]", card).first().attr("alt") || $(".card-title, h2, h3", card).first().text().trim();
+    return { link, title };
+  }).filter((item) => item.link.startsWith("/serie/") && item.title);
+}
+function fullUrl(path) {
+  return /^https?:\/\//i.test(path) ? path : `${BASE}${path.startsWith("/") ? "" : "/"}${path}`;
+}
 function getStreams(tmdbId, mediaType, season, episode) {
   return __async(this, null, function* () {
     if (mediaType !== "tv" || season == null || episode == null) return [];
@@ -444,12 +456,18 @@ function getStreams(tmdbId, mediaType, season, episode) {
       const meta = yield getMeta(tmdbId, mediaType);
       let series = null;
       for (const q of meta.titles) {
-        const $ = load(yield getText(`${BASE}/suche?term=${encodeURIComponent(q)}&tab=shows`, { headers: { Referer: `${BASE}/suche` } }));
-        const items = all($, "a.show-cover").map((a) => ({ link: a.attr("href"), title: $("img", a).attr("alt") }));
-        if (series = yield pickSeries(items, meta, BASE)) break;
+        try {
+          const $ = load(yield getText(`${BASE}/suche?term=${encodeURIComponent(q)}&tab=shows`, { headers: { Referer: `${BASE}/suche` } }));
+          if (series = yield pickSeries(parseSearchResults($), meta, BASE)) break;
+        } catch (e) {
+          console.error(`[Serienstream] Search for ${q}: ${e.message}`);
+        }
       }
       series = series || (yield bySlug(BASE, "/serie/", meta));
-      if (!series) return [];
+      if (!series) {
+        console.error(`[Serienstream] No matching series for ${meta.titles.join(" / ")}`);
+        return [];
+      }
       const episodePage = (path) => __async(null, null, function* () {
         const epUrl2 = BASE + path;
         const $ = load(yield getText(epUrl2).catch(() => ""));
@@ -457,7 +475,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
           url: b.attr("data-play-url"),
           lang: b.attr("data-language-label"),
           langId: b.attr("data-language-id")
-        }));
+        })).filter((l) => l.url);
         return { epUrl: epUrl2, links: links2 };
       });
       let page = yield episodePage(`${series.link}/staffel-${season}/episode-${episode}`);
@@ -466,9 +484,12 @@ function getStreams(tmdbId, mediaType, season, episode) {
         if (split) page = yield episodePage(split);
       }
       const { epUrl, links } = page;
-      for (const langId of ["1", "3", "2"]) {
-        const out = yield Promise.all(links.filter((l) => l.langId === langId).map((l) => __async(null, null, function* () {
-          const embed = yield followRedirect(BASE + l.url, epUrl).catch(() => null);
+      if (!links.length) console.error(`[Serienstream] No provider links on ${epUrl}`);
+      const knownLanguageIds = ["1", "3", "2"];
+      for (const langId of [...knownLanguageIds, "other"]) {
+        const eligible = links.filter((l) => langId === "other" ? !knownLanguageIds.includes(l.langId) : l.langId === langId);
+        const out = yield Promise.all(eligible.map((l) => __async(null, null, function* () {
+          const embed = yield followRedirect(fullUrl(l.url), epUrl).catch(() => null);
           return (yield resolveEmbed(embed, epUrl)).map((s) => ({
             name: "Serienstream",
             title: `${s.host} \xB7 ${l.lang}`,
