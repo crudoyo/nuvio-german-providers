@@ -58,21 +58,27 @@ function all($, selector) {
 }
 async function test(searchPage, episodePage, redirectExpected) {
     const redirects = [];
+    const episodeRequests = [];
     const ctx = {
         module: { exports: {} }, console, load, all,
         getMeta: async () => ({ titles: ['Columbo'], imdbId: 'tt1466074' }),
-        getText: async url => url.includes('/suche?') ? searchPage : episodePage,
+        getText: async () => searchPage,
+        request: async url => { episodeRequests.push(url); return { headers: { get: key => key === 'set-cookie' ? 'session=abc; Path=/' : '' }, text: async () => episodePage }; },
+        cookieHeader: value => value.split(';')[0],
         pickSeries: async items => items.find(x => x.title === 'Columbo') || null,
         bySlug: async () => null,
         splitSeasonPath: async () => null,
-        followRedirect: async url => { redirects.push(url); return 'https://video.example/embed'; },
+        followRedirect: async (url, referer, cookie) => { redirects.push({ url, referer, cookie }); return 'https://video.example/embed'; },
         resolveEmbed: async () => [{ host: 'video.example', url: 'https://video.example/video.m3u8', quality: 'HLS' }],
         provider: fn => ({ getStreams: fn }),
     };
     vm.runInNewContext(source, ctx);
     const streams = await ctx.module.exports.getStreams('873', 'tv', 1, 2);
     assert.equal(streams.length, 1, 'Expected a returned stream from the shim-only fixture');
-    assert.equal(redirects[0], redirectExpected);
+    assert.equal(redirects[0].url, redirectExpected);
+    assert.equal(redirects[0].cookie, 'session=abc');
+    assert.equal(redirects[0].referer, episodeRequests[0]);
+    assert.equal(episodeRequests[0], 'https://serienstream.to/serie/columbo/staffel-1/episode-4', 'TMDB Columbo S01E02 should open s.to S01E04');
 }
 (async () => {
     await test('SEARCH_CARD', 'EPISODE', 'https://redirect.example/test');
@@ -81,5 +87,7 @@ async function test(searchPage, episodePage, redirectExpected) {
     const bundled = fs.readFileSync(path.join(__dirname, '../providers/serienstream.js'), 'utf8');
     assert.ok(bundled.includes('card.attr("href")'), 'Bundled plugin must contain the compatible fix');
     assert.ok(!bundled.includes('card.is('), 'Unsupported .is() must not appear in the Nuvio plugin');
+    assert.ok(bundled.includes('function siteEpisode('), 'Bundle should include Columbo episode mapping');
+    assert.ok(bundled.includes('var cookieHeader'), 'Bundle should include optional cookie forwarding');
     console.log('PASS: Nuvio jsoup shim, both layouts, both link forms, fallback language, bundle');
 })().catch(e => { console.error(e); process.exitCode = 1; });
