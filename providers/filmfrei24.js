@@ -154,31 +154,23 @@ function pickBest(items, meta) {
 
 // src/filmfrei24/index.js
 var BASE = "https://filmfrei24.com";
-function catalog(html) {
-  let s = html.slice(html.indexOf("const ALL_FILMS"));
-  s = s.slice(s.indexOf("=") + 1);
-  return JSON.parse(s.slice(0, s.indexOf("\n")).trim().replace(/;$/, ""));
-}
+var API = BASE + "/beta/api.php";
 function getStreams(tmdbId, mediaType, season, episode) {
   return __async(this, null, function* () {
     try {
       const tv = mediaType === "tv";
-      const films = catalog(yield getText(BASE + (tv ? "/serien/" : "/")));
-      let hit = films.find((f) => String(f.id) === String(tmdbId));
-      if (!hit) hit = pickBest(films, yield getMeta(tmdbId, mediaType));
+      if (tv && (!season || !episode)) return [];
+      const [catalog, meta] = yield Promise.all([getJson(`${API}?q=catalog&part=core`), getMeta(tmdbId, mediaType)]);
+      const hit = pickBest((tv ? catalog.series : catalog.films) || [], meta);
       if (!hit) return [];
-      let url = hit.video;
-      if (tv) {
-        if (!hit._series_id || !season || !episode) return [];
-        const html = yield getText(`${BASE}/player/?s=${encodeURIComponent(hit._series_id)}&type=series&season=${season}&ep=${episode}`);
-        url = (html.match(/<video[^>]*data-src="([^"]+)"/) || [])[1];
-      }
+      const play = yield getJson(`${API}?q=play&type=${tv ? "s" : "f"}&id=${encodeURIComponent(hit.id)}${tv ? `&season=${season}&ep=${episode}` : ""}`);
+      const url = play.ok && play.src;
       if (!url || !/^https?:/.test(url)) return [];
       return [{
         name: "FilmFrei24",
-        title: `${hit.language || "Deutsch"} \xB7 ${/\.m3u8/.test(url) ? "HLS" : "MP4"}`,
+        title: `${hit.lang || "Deutsch"} \xB7 ${/\.m3u8/.test(url) ? "HLS" : "MP4"}`,
         url,
-        quality: "auto",
+        quality: hit.quality === "HD" ? "1080p" : "auto",
         headers: { Referer: BASE + "/" }
       }];
     } catch (e) {
