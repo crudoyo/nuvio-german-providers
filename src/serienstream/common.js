@@ -4,9 +4,18 @@ import { score } from '../../shared/match.js';
 // Aniworld and Serienstream hide hosters behind a 30x redirect. Let the client follow it and take the final URL:
 // aniworld sends that 301 with "content-encoding: gzip" and an empty body, which OkHttp (Nuvio desktop/Android)
 // can only survive by not reading it, and Nuvio strips any Accept-Encoding a plugin sets (iOS ignores manual redirects anyway).
-export async function followRedirect(url, referer) {
-    const res = await send(url, { headers: { 'User-Agent': UA, Referer: referer } });
-    return res.url && res.url !== url ? res.url : null;
+// Optional session cookies can be needed when following an episode's provider links.
+export const cookieHeader = setCookie => String(setCookie || '')
+    .split(/,(?=\s*[\w.-]+=)/).map(c => c.split(';')[0].trim()).filter(Boolean).join('; ');
+
+export async function followRedirect(url, referer, cookie) {
+    const headers = { 'User-Agent': UA, Referer: referer };
+    if (cookie) headers.Cookie = cookie;
+    const res = await send(url, { headers });
+    if (res.url && res.url !== url) return res.url;
+    const contentType = res.headers && res.headers.get ? res.headers.get('content-type') : '';
+    console.error(`[Serienstream] Provider redirect did not resolve (HTTP ${res.status || '?'}; ${contentType || 'unknown type'}). A browser check or an unavailable hoster may be the reason.`);
+    return null;
 }
 
 // exact title matches only; several (remakes, same-name shows) -> the one whose page links the TMDB IMDb id
