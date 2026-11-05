@@ -1,10 +1,19 @@
-import { getText, provider } from '../../shared/http.js';
+import { getText, request, provider } from '../../shared/http.js';
 import { getMeta } from '../../shared/tmdb.js';
 import { load, all } from '../../shared/dom.js';
 import { resolveEmbed } from '../../shared/extractors/index.js';
-import { bySlug, followRedirect, pickSeries, splitSeasonPath } from './common.js';
+import { bySlug, cookieHeader, followRedirect, pickSeries, splitSeasonPath } from './common.js';
 
 const BASE = 'https://serienstream.to';
+
+// TMDB puts Columbo's two pilot films in Specials (S00). SerienStream
+// places them at S01E01 and S01E02, shifting the regular first season.
+function siteEpisode(tmdbId, season, episode) {
+    if (String(tmdbId) === '873' && Number(season) === 1 && episode >= 1 && episode <= 7) {
+        return { season: 1, episode: Number(episode) + 2 };
+    }
+    return { season, episode };
+}
 
 // Support both the current card-based search page and the older cover layout.
 function parseSearchResults($) {
@@ -41,22 +50,28 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             console.error(`[Serienstream] No matching series for ${meta.titles.join(' / ')}`);
             return [];
         }
+        const mapped = siteEpisode(tmdbId, season, episode);
+        if (mapped.episode !== Number(episode)) console.error(`[Serienstream] Columbo S${season}E${episode} maps to S${mapped.season}E${mapped.episode}`);
         const episodePage = async path => {
             const epUrl = BASE + path;
-            // an episode that does not exist answers 404
-            const $ = load(await getText(epUrl).catch(() => ''));
+            const res = await request(epUrl).catch(e => {
+                console.error(`[Serienstream] Episode request ${epUrl}: ${e.message}`);
+                return null;
+            });
+            const cookie = res && res.headers && res.headers.get ? cookieHeader(res.headers.get('set-cookie')) : '';
+            const $ = load(res ? await res.text() : '');
             // "Provider" links always answer 410
             const links = all($, '.link-wrapper button').filter(b => b.attr('data-provider-name') !== 'Provider').map(b => ({
                 url: b.attr('data-play-url'), lang: b.attr('data-language-label'), langId: b.attr('data-language-id'),
             })).filter(l => l.url);
-            return { epUrl, links };
+            return { epUrl, links, cookie };
         };
-        let page = await episodePage(`${series.link}/staffel-${season}/episode-${episode}`);
+        let page = await episodePage(`${series.link}/staffel-${mapped.season}/episode-${mapped.episode}`);
         if (!page.links.length) {
-            const split = await splitSeasonPath(BASE, series.link, season, episode);
+            const split = await splitSeasonPath(BASE, series.link, mapped.season, mapped.episode);
             if (split) page = await episodePage(split);
         }
-        const { epUrl, links } = page;
+        const { epUrl, links, cookie } = page;
         if (!links.length) console.error(`[Serienstream] No provider links on ${epUrl}`);
         // s.to shows a captcha instead of redirecting after ~10 links per IP, so spend links on German first
         // (1 = Deutsch, 3 = Ger-Sub, 2 = Englisch) and only fall back to the next language if nothing played
@@ -67,7 +82,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             const eligible = links.filter(l => langId === 'other' ? !knownLanguageIds.includes(l.langId) : l.langId === langId);
             const streams = [];
             for (const l of eligible) {
-                const embed = await followRedirect(fullUrl(l.url), epUrl).catch(e => {
+                const embed = await followRedirect(fullUrl(l.url), epUrl, cookie).catch(e => {
                     console.error(`[Serienstream] Redirect ${l.url}: ${e.message}`);
                     return null;
                 });
