@@ -397,10 +397,16 @@ function score(title, year, meta) {
 }
 
 // src/serienstream/common.js
-function followRedirect(url, referer) {
+var cookieHeader = (setCookie) => String(setCookie || "").split(/,(?=\s*[\w.-]+=)/).map((c) => c.split(";")[0].trim()).filter(Boolean).join("; ");
+function followRedirect(url, referer, cookie) {
   return __async(this, null, function* () {
-    const res = yield send(url, { headers: { "User-Agent": UA, Referer: referer } });
-    return res.url && res.url !== url ? res.url : null;
+    const headers = { "User-Agent": UA, Referer: referer };
+    if (cookie) headers.Cookie = cookie;
+    const res = yield send(url, { headers });
+    if (res.url && res.url !== url) return res.url;
+    const contentType = res.headers && res.headers.get ? res.headers.get("content-type") : "";
+    console.error(`[Serienstream] Provider redirect did not resolve (HTTP ${res.status || "?"}; ${contentType || "unknown type"}). A browser check or an unavailable hoster may be the reason.`);
+    return null;
   });
 }
 function pickSeries(items, meta, base) {
@@ -437,6 +443,12 @@ function bySlug(base, prefix, meta) {
 
 // src/serienstream/index.js
 var BASE = "https://serienstream.to";
+function siteEpisode(tmdbId, season, episode) {
+  if (String(tmdbId) === "873" && Number(season) === 1 && episode >= 1 && episode <= 7) {
+    return { season: 1, episode: Number(episode) + 2 };
+  }
+  return { season, episode };
+}
 function parseSearchResults($) {
   return all($, ".results-group .card, a.show-cover, a.show-card").map((card) => {
     const anchor = card.attr("href") ? card : $("a[href]", card).first();
@@ -468,22 +480,29 @@ function getStreams(tmdbId, mediaType, season, episode) {
         console.error(`[Serienstream] No matching series for ${meta.titles.join(" / ")}`);
         return [];
       }
+      const mapped = siteEpisode(tmdbId, season, episode);
+      if (mapped.episode !== Number(episode)) console.error(`[Serienstream] Columbo S${season}E${episode} maps to S${mapped.season}E${mapped.episode}`);
       const episodePage = (path) => __async(null, null, function* () {
         const epUrl2 = BASE + path;
-        const $ = load(yield getText(epUrl2).catch(() => ""));
+        const res = yield request(epUrl2).catch((e) => {
+          console.error(`[Serienstream] Episode request ${epUrl2}: ${e.message}`);
+          return null;
+        });
+        const cookie = res && res.headers && res.headers.get ? cookieHeader(res.headers.get("set-cookie")) : "";
+        const $ = load(res ? yield res.text() : "");
         const links2 = all($, ".link-wrapper button").filter((b) => b.attr("data-provider-name") !== "Provider").map((b) => ({
           url: b.attr("data-play-url"),
           lang: b.attr("data-language-label"),
           langId: b.attr("data-language-id")
         })).filter((l) => l.url);
-        return { epUrl: epUrl2, links: links2 };
+        return { epUrl: epUrl2, links: links2, cookie };
       });
-      let page = yield episodePage(`${series.link}/staffel-${season}/episode-${episode}`);
+      let page = yield episodePage(`${series.link}/staffel-${mapped.season}/episode-${mapped.episode}`);
       if (!page.links.length) {
-        const split = yield splitSeasonPath(BASE, series.link, season, episode);
+        const split = yield splitSeasonPath(BASE, series.link, mapped.season, mapped.episode);
         if (split) page = yield episodePage(split);
       }
-      const { epUrl, links } = page;
+      const { epUrl, links, cookie } = page;
       if (!links.length) console.error(`[Serienstream] No provider links on ${epUrl}`);
       // Resolve hoster redirects sequentially to avoid wasting gated links.
       const knownLanguageIds = ["1", "3", "2"];
@@ -492,7 +511,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
         const eligible = links.filter((l) => langId === "other" ? !knownLanguageIds.includes(l.langId) : l.langId === langId);
         const streams = [];
         for (const l of eligible) {
-          const embed = yield followRedirect(fullUrl(l.url), epUrl).catch((e) => {
+          const embed = yield followRedirect(fullUrl(l.url), epUrl, cookie).catch((e) => {
             console.error(`[Serienstream] Redirect ${l.url}: ${e.message}`);
             return null;
           });
