@@ -5,6 +5,10 @@ on:
     paths:
       - 'src/serienstream/**'
       - 'providers/serienstream.js'
+      - 'src/huhuto/**'
+      - 'providers/huhuto.js'
+      - 'src/filmfrei24/**'
+      - 'providers/filmfrei24.js'
       - 'tests/serienstream-jsoup.test.cjs'
       - '.github/workflows/serienstream-regression.yml'
   pull_request:
@@ -24,5 +28,10 @@ jobs:
         with:
           node-version: '22'
       - run: node --check providers/serienstream.js
+      - run: node --check providers/huhuto.js
+      - run: node --check providers/filmfrei24.js
+      - run: node --check health.js
       - run: node --check src/serienstream/index.js
+      - run: node --check src/huhuto/index.js
+      - run: node --check src/filmfrei24/index.js
       - run: node tests/serienstream-jsoup.test.cjs
