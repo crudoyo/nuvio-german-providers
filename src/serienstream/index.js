@@ -60,18 +60,29 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         if (!links.length) console.error(`[Serienstream] No provider links on ${epUrl}`);
         // s.to shows a captcha instead of redirecting after ~10 links per IP, so spend links on German first
         // (1 = Deutsch, 3 = Ger-Sub, 2 = Englisch) and only fall back to the next language if nothing played
+        // Ask hosters one at a time: s.to rate-limits or gates repeated redirects.
         const knownLanguageIds = ['1', '3', '2'];
+        let redirects = 0;
         for (const langId of [...knownLanguageIds, 'other']) {
             const eligible = links.filter(l => langId === 'other' ? !knownLanguageIds.includes(l.langId) : l.langId === langId);
-            const out = await Promise.all(eligible.map(async l => {
-                const embed = await followRedirect(fullUrl(l.url), epUrl).catch(() => null);
-                return (await resolveEmbed(embed, epUrl)).map(s => ({
-                    name: 'Serienstream', title: `${s.host} · ${l.lang}`, url: s.url, quality: s.quality, headers: s.headers,
-                }));
-            }));
-            const streams = [].concat(...out);
+            const streams = [];
+            for (const l of eligible) {
+                const embed = await followRedirect(fullUrl(l.url), epUrl).catch(e => {
+                    console.error(`[Serienstream] Redirect ${l.url}: ${e.message}`);
+                    return null;
+                });
+                if (!embed) continue;
+                redirects++;
+                const found = await resolveEmbed(embed, epUrl);
+                streams.push(...found.map(s => ({
+                    name: 'Serienstream', title: `${s.host} · ${l.lang}`, url: s.url,
+                    quality: s.quality, headers: s.headers,
+                })));
+                if (streams.length >= 2) break;
+            }
             if (streams.length) return streams;
         }
+        if (links.length) console.error(`[Serienstream] ${links.length} hoster links, ${redirects} redirects, no streams`);
     } catch (e) {
         console.error(`[Serienstream] ${e.message}`);
     }
