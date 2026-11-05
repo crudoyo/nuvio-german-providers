@@ -1,6 +1,6 @@
 {
   "name": "German Providers",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "Deutsche Quellen für Nuvio – portiert von Bnyro/GermanProviders (CloudStream)",
   "author": "InvalidPandaa",
   "scrapers": [
@@ -79,7 +79,7 @@
       "id": "arte",
       "name": "Arte",
       "description": "Filme und Serien aus der ARTE-Mediathek (deutsche Fassung, weitere Sprachversionen wie OmU gekennzeichnet)",
-      "version": "1.0.5",
+      "version": "1.0.11",
       "filename": "providers/arte.js",
       "supportedTypes": [
         "movie",
@@ -172,7 +172,7 @@
       "id": "serienstream",
       "name": "Serienstream",
       "description": "Serien auf Deutsch und im Original von SerienStream (s.to)",
-      "version": "1.0.10",
+      "version": "1.0.11",
       "filename": "providers/serienstream.js",
       "supportedTypes": [
         "tv"
