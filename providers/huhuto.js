@@ -373,16 +373,10 @@ function resolveEmbed(url, referer) {
 // src/huhuto/index.js
 var BASE = "https://huhu.to";
 var LANG = { de: "Deutsch", en: "Englisch", fr: "Franz\xF6sisch", es: "Spanisch", ja: "Japanisch", jp: "Japanisch" };
-function sources(meta, season, episode) {
+function sources(tmdbId, mediaType, season, episode) {
   return __async(this, null, function* () {
-    const body = { language: "de", region: "DE", clientVersion: "3.1.0", type: meta.type === "tv" ? "series" : "movie", ids: { tmdb_id: meta.tmdbId, imdb_id: meta.imdbId }, name: meta.title };
-    if (meta.type === "tv") body.episode = { season, episode };
-    const res = yield request(`${BASE}/mediaurl-source.json`, {
-      method: "POST",
-      body: JSON.stringify(body),
-      headers: { "Content-Type": "application/json; charset=utf-8", "User-Agent": "MediaUrl/2" }
-    });
-    return res.json();
+    const id = mediaType === "tv" ? `series/tmdb:${tmdbId}:${season}:${episode}` : `video/tmdb:${tmdbId}`;
+    return (yield getJson(`${BASE}/vod/source/${id}.json?language=de&region=DE`)).sources || [];
   });
 }
 function resolve(src) {
@@ -391,9 +385,9 @@ function resolve(src) {
     if (url.includes("huhu.to/")) url = (yield request(url)).url;
     return (yield resolveEmbed(url, `${BASE}/`)).map((s) => ({
       name: "Huhu",
-      title: `${s.host} \xB7 ${(src.languages || ["de"]).map((l) => LANG[l] || l.toUpperCase()).join("/")}${src.tag ? " \xB7 " + src.tag : ""}`,
+      title: `${s.host} \xB7 ${(src.languages || ["de"]).map((l) => LANG[l] || l.toUpperCase()).join("/")}`,
       url: s.url,
-      quality: /\d/.test(s.quality) ? s.quality : ((src.tag || "").match(/\d{3,4}p/) || ["auto"])[0],
+      quality: /\d/.test(s.quality) ? s.quality : /^\d{3,4}p$/.test(src.quality) ? src.quality : "auto",
       headers: s.headers
     }));
   });
@@ -401,9 +395,8 @@ function resolve(src) {
 function getStreams(tmdbId, mediaType, season, episode) {
   return __async(this, null, function* () {
     try {
-      const meta = yield getMeta(tmdbId, mediaType);
       const german = (s) => (s.languages || ["de"]).includes("de") ? 0 : 1;
-      const list = (yield sources(meta, season, episode)).filter((s) => s.type === "url" && s.url).sort((a, b) => german(a) - german(b));
+      const list = (yield sources(tmdbId, mediaType, season, episode)).filter((s) => s.url).sort((a, b) => german(a) - german(b));
       return [].concat(...yield Promise.all(list.map((s) => resolve(s).catch(() => []))));
     } catch (e) {
       console.error(`[Huhu] ${e.message}`);
