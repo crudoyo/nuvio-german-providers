@@ -40,22 +40,27 @@ GPL-3.0-or-later. Seiten-Logik nach [Bnyro/GermanProviders](https://github.com/B
 Hoster-Decoder nach [recloudstream/cloudstream](https://github.com/recloudstream/cloudstream) (GPL-3.0).
 Die Plugins hosten keine Inhalte, sie verhalten sich wie ein Browser, der öffentlich erreichbare Seiten aufruft.
 
-## Fork: SerienStream-Suche (1.0.6)
+## Gezielte Änderungen dieses Forks (1.0.11)
 
-Der SerienStream-Scraper unterstützt Suchtreffer als Cards sowie das bisherige Cover-Layout, probiert bei einem Suchfehler weitere Titel und den bestehenden Slug-Fallback und korrigiert absolute Weiterleitungs-URLs und unbekannte Sprach-IDs. Der Fix ist anhand lokaler Tests geprüft, aber noch nicht als Live-Wiedergabe auf einem Nuvio-Gerät bestätigt. Captchas werden nicht umgangen; die Hoster-Auflösung kann weiterhin fehlschlagen.
+Der SerienStream-Scraper wurde nach Klärung des DNS-Problems vollständig auf den Originalstand
+von [InvalidPandaa/nuvio-german-providers](https://github.com/InvalidPandaa/nuvio-german-providers)
+zurückgesetzt. Es gibt **keine** Columbo-Episodenverschiebung, experimentelle Such-Selektoren
+oder veränderte Hoster-Weiterleitungen mehr.
 
-## Fork-Updates 1.0.9
+Aus [MudWorlds Fork](https://github.com/MudWorld/nuvio-german-providers) sind nur
+folgende gezielten Verbesserungen übernommen:
 
-- **SerienStream 1.0.9:** Nuvio-kompatibler Suchparser ohne `.is()`, serielle Hoster-Abfragen und bessere Diagnose. Regressionstest: `node tests/serienstream-jsoup.test.cjs`.
-- **FilmFrei24 1.0.8:** Wechsel zur API `/beta/api.php` (basierend auf MudWorld).
-- **Huhu 1.0.8:** Wechsel zur neuen mHub-Quellenschnittstelle (basierend auf MudWorld).
-- **Anbieter-Diagnose:** Testfälle für 19 Provider im Manifest, `health.json` und `npm run health` (Live-Tests benötigen `TMDB_API_KEY`).
+- **Huhu:** aktuelle mHub-VOD-Schnittstelle statt der veralteten MediaURL-API.
+- **FilmFrei24:** aktualisierte Katalog- und Wiedergabe-API.
+- **ARTE:** bessere Suche nach mehrteiligen oder alternativen Titeln (z. B. „Bron/Broen“).
+- **Diagnose:** `health.js`, `health.json`, bekannte Testfälle in `manifest.json`.
+  Mit `npm run health` lassen sich die Anbieter prüfen; für Live-Anfragen ist
+  `TMDB_API_KEY` nötig.
 
-Die Quellenschnittstellen und die Wiedergabe wurden hier nicht auf einem echten Nuvio-Endgerät überprüft. Captcha-/Browser-Prüfungen und Hoster-Ausfälle werden nicht umgangen.
+Bewusst **nicht übernommen** wurden globale Timeout-/Fetch-Änderungen und pauschale
+Sperrlisten für zusätzliche Videohoster. Diese würden auch funktionierende Provider
+beeinflussen können. Die übernommenen Schnittstellenänderungen sind nicht auf einem
+realen Nuvio-/Fire-TV-Gerät live verifiziert.
 
-## Columbo 1.0.10: Zuordnung und Hoster-Diagnose
-
-- Columbo hat die TMDB-ID `873`. TMDB zählt in Staffel 1 sieben reguläre Folgen und führt die beiden Pilotfilme separat; SerienStream zählt beide Pilotfilme als S01E01 und S01E02. Deshalb wird bei Columbo S01E01–S01E07 im SerienStream-Scraper die Episodennummer um 2 verschoben.
-- Die SerienStream-Episodenseite wird einschließlich eines optionalen Sitzungscookies eingelesen. Dieses Cookie wird bei der Hoster-Weiterleitung mitgegeben; fehlt es, funktioniert das bisherige Verhalten weiterhin.
-- Bleibt die Hoster-Weiterleitung bei der SerienStream-Adresse stehen, protokolliert der Scraper einen möglichen Browser-Check beziehungsweise einen nicht verfügbaren Hoster, anstatt einen spielbaren Stream vorzutäuschen.
-- **Einschränkung:** Die korrekte Zuordnung und Cookie-Weitergabe sind mit simulierten Antworten getestet; echte Columbo-Wiedergabe konnte nicht verifiziert werden. CAPTCHAs werden nicht umgangen.
+Die Testbranch-Sicherung des vorherigen experimentellen Stands liegt unter
+`backup/experimental-serienstream-before-dns-cleanup`.
