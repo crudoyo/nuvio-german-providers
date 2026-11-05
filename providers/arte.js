@@ -173,7 +173,9 @@ function zoneItems(zone, query, maxPages) {
 function getStreams(tmdbId, mediaType, season, episode) {
   return __async(this, null, function* () {
     try {
-      const meta = yield getMeta(tmdbId, mediaType);
+      let meta = yield getMeta(tmdbId, mediaType);
+      const parts = [].concat(...meta.titles.map((t) => t.split(/ ?\/ ?| [-–:] |: /))).map((p) => p.trim()).filter((p) => p.length > 3);
+      meta = Object.assign({}, meta, { titles: meta.titles.concat(parts).filter((t, i, a) => a.indexOf(t) === i) });
       const isTv = mediaType === "tv";
       let hit;
       for (const q of meta.titles) {
