@@ -14,7 +14,7 @@ auf allen Plattformen: Android, Android TV, iOS, macOS, Windows.
 In Nuvio in den Plugin-Einstellungen ein Repository mit der **rohen** URL der `manifest.json` hinzufügen:
 
 ```
-https://raw.githubusercontent.com/crudoyo/nuvio-german-providers/refs/heads/main/manifest.json
+https://raw.githubusercontent.com/crudoyo/nuvio-german-providers/main/manifest.json
 ```
 
 Englische Tonspuren werden bei verfügbaren Titeln zusätzlich angezeigt. Bei **Deutsch / Englisch**
