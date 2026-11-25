@@ -1,6 +1,6 @@
 {
-  "name": "German Providers",
-  "version": "1.0.12",
+  "name": "AIO",
+  "version": "1.0.13",
   "description": "Deutsch und, soweit verfügbar, Englisch für Nuvio – portiert von Bnyro/GermanProviders (CloudStream)",
   "author": "InvalidPandaa",
   "scrapers": [
