@@ -37,6 +37,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             return links.map(s => ({
                 name: 'Moflix',
                 title: `${s.host} · ${lang} · ${v.quality || s.quality || 'auto'}`,
+                audioLanguages: [v.language],
                 url: s.url,
                 quality: (`${s.quality} ${v.quality}`.match(/\d{3,4}p/) || ['auto'])[0],
                 headers: s.headers,

@@ -1,4 +1,5 @@
 import { getText, postForm, provider } from '../../shared/http.js';
+import { audioName } from '../../shared/audio.js';
 import { getMeta } from '../../shared/tmdb.js';
 import { norm } from '../../shared/match.js';
 import { load, all } from '../../shared/dom.js';
@@ -67,7 +68,8 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         const { epUrl, $, links } = page;
         const out = await Promise.all(links.map(async l => {
             const embed = await followRedirect(BASE + l.url, epUrl).catch(() => null);
-            const lang = LANG[l.lang] || $(`.changeLanguageBox img[data-lang-key="${l.lang}"]`).attr('title') || '';
+            const label = $(`.changeLanguageBox img[data-lang-key="${l.lang}"]`).attr('title');
+            const lang = audioName(label) || LANG[l.lang] || label || '';
             return (await resolveEmbed(embed, epUrl)).map(s => ({
                 name: 'Aniworld', title: `${s.host} · ${lang}`, url: s.url, quality: s.quality, headers: s.headers,
             }));

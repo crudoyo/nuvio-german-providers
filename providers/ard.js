@@ -1,3 +1,18 @@
+var __getOwnPropSymbols = Object.getOwnPropertySymbols;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __propIsEnum = Object.prototype.propertyIsEnumerable;
+var __objRest = (source, exclude) => {
+  var target = {};
+  for (var prop in source)
+    if (__hasOwnProp.call(source, prop) && exclude.indexOf(prop) < 0)
+      target[prop] = source[prop];
+  if (source != null && __getOwnPropSymbols)
+    for (var prop of __getOwnPropSymbols(source)) {
+      if (exclude.indexOf(prop) < 0 && __propIsEnum.call(source, prop))
+        target[prop] = source[prop];
+    }
+  return target;
+};
 var __async = (__this, __arguments, generator) => {
   return new Promise((resolve, reject) => {
     var fulfilled = (value) => {
@@ -19,6 +34,56 @@ var __async = (__this, __arguments, generator) => {
   });
 };
 
+// shared/audio.js
+var NAMES = {
+  de: "Deutsch",
+  deu: "Deutsch",
+  ger: "Deutsch",
+  german: "Deutsch",
+  deutsch: "Deutsch",
+  en: "Englisch",
+  eng: "Englisch",
+  english: "Englisch",
+  englisch: "Englisch",
+  fr: "Franz\xF6sisch",
+  fra: "Franz\xF6sisch",
+  fre: "Franz\xF6sisch",
+  french: "Franz\xF6sisch",
+  franz\u00F6sisch: "Franz\xF6sisch",
+  es: "Spanisch",
+  spa: "Spanisch",
+  spanish: "Spanisch",
+  spanisch: "Spanisch",
+  ja: "Japanisch",
+  jpn: "Japanisch",
+  jp: "Japanisch",
+  japanese: "Japanisch",
+  japanisch: "Japanisch"
+};
+function audioName(value) {
+  const code = String(value || "").trim().toLowerCase().replace(/^([a-z]{2,3})[-_][a-z]{2,4}(?:[-_].*)?$/, "$1");
+  return Object.prototype.hasOwnProperty.call(NAMES, code) ? NAMES[code] : "";
+}
+function audioNames(values) {
+  return [...new Set(values.map(audioName).filter(Boolean))].sort((a, b) => (b === "Deutsch") - (a === "Deutsch"));
+}
+function isHls(stream) {
+  return /\.m3u8(?:[?#/]|$)|\/hls[/?]|\/master\.txt(?:[?#]|$)/i.test(stream.url) || /(?:^| · )HLS$/i.test(stream.title || "");
+}
+function attributes(line) {
+  const out = {};
+  line.replace(/([A-Z0-9-]+)=(?:"([^"]*)"|([^,]*))/g, (_, key, quoted, plain) => {
+    out[key] = quoted === void 0 ? plain : quoted;
+  });
+  return out;
+}
+function playlistAudio(text) {
+  if (!/^#EXTM3U\s/.test(text.trim())) return [];
+  const lines = text.split(/\r?\n/);
+  const groups = new Set(lines.filter((l) => l.startsWith("#EXT-X-STREAM-INF:")).map((l) => attributes(l).AUDIO).filter(Boolean));
+  return audioNames(lines.filter((l) => l.startsWith("#EXT-X-MEDIA:")).map(attributes).filter((a) => a.TYPE === "AUDIO" && (!groups.size || groups.has(a["GROUP-ID"])) && !/describes-video/i.test(a.CHARACTERISTICS || "") && !/audio description|audiodeskription/i.test(a.NAME || "")).map((a) => audioName(a.LANGUAGE) || (a.LANGUAGE && a.LANGUAGE !== "und" ? "" : audioName(a.NAME))));
+}
+
 // shared/http.js
 var UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 var DEADLINE_MS = 25e3;
@@ -39,28 +104,66 @@ function send(url, opts) {
     throw err;
   });
 }
-var SUBBED = [[/ger(man)?[\s._-]*sub|untertitel deutsch/i, "Original, dt. UT"], [/eng(lish)?[\s._-]*sub|untertitel englisch/i, "Original, engl. UT"]];
+var SUBBED = [
+  [/ger(man)?[\s._-]*sub|(?:untertitel|\bUT) deutsch|original, dt\. ut/i, "Original, dt. UT"],
+  [/(?:eng(?:lish)?|\ben)[\s._-]*sub|(?:untertitel|\bUT) englisch|original, engl\. ut/i, "Original, engl. UT"]
+];
 var LANGS = [[/japanisch, dt\. ut/i, "Japanisch, dt. UT"], [/japanisch, engl\. ut/i, "Japanisch, engl. UT"]].concat(SUBBED, [
   [/\bomu\b/i, "OmU"],
-  [/\bov\b/i, "OV"],
-  [/englisch|\ben\b/i, "Englisch"],
+  [/\bov\b|\boriginalversion\b/i, "OV"],
+  [/\b(?:englisch|english|eng|en)\b/i, "Englisch"],
   [/franz|\bfr\b/i, "Franz\xF6sisch"],
   [/spanisch/i, "Spanisch"],
   [/japanisch/i, "Japanisch"],
   [/deutsch|\bde\b/i, "Deutsch"]
 ]);
 var fileNames = {};
-function decorate(s) {
-  const hit = LANGS.find(([re]) => re.test(s.title || ""));
+function titleLanguage(title2) {
+  const [first, ...rest] = (title2 || "").split(" \xB7 ");
+  const labels = (audioName(first) ? [first, ...rest] : rest).join(" \xB7 ");
+  const hit = LANGS.find(([re]) => re.test(labels));
+  if (hit) return hit;
+  return LANGS.find(([re, lang]) => lang !== "Englisch" && re.test(first));
+}
+function decorate(_a, detected) {
+  var _b = _a, { audioLanguages } = _b, s = __objRest(_b, ["audioLanguages"]);
+  const hit = titleLanguage(s.title);
+  const audio = detected.length ? detected : audioNames(audioLanguages || []);
   let lang = hit ? hit[1] : "Deutsch", title2 = s.title;
   const sub = SUBBED.find(([re]) => re.test(fileNames[s.url] || ""));
+  let subtitle = /UT|OmU/.test(lang) ? lang : "";
   if (sub && !/UT|OmU/.test(lang)) {
-    lang = sub[1];
+    subtitle = sub[1];
+    lang = subtitle;
     title2 = hit ? title2.replace(hit[0], lang) : [title2, lang].filter(Boolean).join(" \xB7 ");
   }
-  const quality = s.quality && s.quality !== "auto" ? s.quality : /\.m3u8|\/hls|master/i.test(s.url) ? "HLS" : "MP4";
+  if (audio.length && (!subtitle || audio.includes("Englisch"))) {
+    lang = [audio.join(" / "), subtitle && subtitle.replace(/^Original, /, "")].filter(Boolean).join(", ");
+    if (detected.length) {
+      const parts = (title2 || "").split(" \xB7 ");
+      const index = parts.findIndex((part) => audioName(part));
+      if (index >= 0) parts[index] = audio.join(" / ");
+      else parts.push(audio.join(" / "));
+      title2 = parts.filter(Boolean).join(" \xB7 ");
+    }
+  }
+  const quality = s.quality && s.quality !== "auto" ? s.quality : isHls(s) || /\/hls|master/i.test(s.url) ? "HLS" : "MP4";
   const host = ((s.title || "").split(" \xB7 ")[0].match(/^[\w-]+\.[a-z]{2,}$/) || [])[0];
   return { lang, stream: Object.assign({}, s, { name: [s.name, lang, host].filter(Boolean).join(" \xB7 "), title: title2, quality }) };
+}
+function detectEnglishAudio(streams) {
+  return __async(this, null, function* () {
+    const playlists = /* @__PURE__ */ new Map();
+    return Promise.all(streams.map((s) => __async(null, null, function* () {
+      if (!isHls(s) || audioNames(s.audioLanguages || []).includes("Englisch") || (titleLanguage(s.title) || [])[1] === "Englisch") return [];
+      const key = JSON.stringify([s.url, s.headers]);
+      if (!playlists.has(key)) {
+        playlists.set(key, getText(s.url, { headers: s.headers }).then(playlistAudio).catch(() => []));
+      }
+      const audio = yield playlists.get(key);
+      return audio.includes("Englisch") ? audio : [];
+    })));
+  });
 }
 function provider(getStreams2) {
   return {
@@ -74,9 +177,10 @@ function provider(getStreams2) {
         } catch (e) {
           console.error(e.message);
         }
+        const audio = yield detectEnglishAudio(streams);
         if (running) yield new Promise((resolve) => idle.push(resolve));
-        const rank = (lang) => lang === "Deutsch" ? 0 : /dt\. UT|OmU/.test(lang) ? 1 : 2;
-        return streams.map(decorate).map((d, i) => [rank(d.lang), i, d.stream]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((d) => d[2]);
+        const rank = (lang) => /^Deutsch(?:$| \/)/.test(lang) ? 0 : /dt\. UT|OmU/.test(lang) ? 1 : 2;
+        return streams.map((s, i) => decorate(s, audio[i])).map((d, i) => [rank(d.lang), i, d.stream]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((d) => d[2]);
       });
     }
   };
@@ -155,7 +259,8 @@ function pickBest(items, meta) {
 // src/ard/index.js
 var API = "https://api.ardmediathek.de";
 var ACCESSIBLE = /Audiodeskription|Gebärdensprache|Klare Sprache/i;
-var LANGS2 = { deu: "Deutsch", eng: "Englisch", fra: "Franz\xF6sisch", ov: "OV" };
+var VERSION_SUFFIX = /\s*[-–:]?\s*(?:\((?:OV|OmU|Originalversion|Englisch)\)|\bOriginalversion)\s*$/i;
+var standardAudio = (a) => a.kind !== "audio-description" && a.kind !== "speech-optimized";
 var title = (t) => (t.shortTitle || t.longTitle || t.title || "").trim();
 var targetId = (t) => ((t.links || {}).target || {}).id || t.id;
 var search = (kind, q) => getJson(`${API}/search-system/search/${kind}/ard?query=${encodeURIComponent(q)}&pageSize=30&platform=MEDIA_THEK&sortingCriteria=SCORE_DESC`).then((r) => r.teasers || []);
@@ -222,8 +327,9 @@ function findMovie(meta) {
     if (show) return groupingTeasers(show.id, "itemsOfShow");
     for (const q of meta.titles) {
       const vods = (yield search("vods", q)).filter((t) => t.coreAssetType === "EPISODE" && t.duration >= 3e3 && !ACCESSIBLE.test(title(t)));
-      const hit = pickBest(vods.map((t) => ({ title: title(t), t })), meta);
-      if (hit) return [hit.t];
+      const items = vods.map((t) => ({ title: title(t).replace(VERSION_SUFFIX, ""), t }));
+      const hit = pickBest(items, meta);
+      if (hit) return items.filter((i) => norm(i.title) === norm(hit.title)).map((i) => i.t);
     }
     return [];
   });
@@ -235,14 +341,19 @@ function streamsOf(teaser) {
     const embedded = player && player.mediaCollection && player.mediaCollection.embedded;
     if (!embedded) return [];
     let media = [].concat.apply([], (embedded.streams || []).map((s) => s.media || []));
-    const standard = media.filter((m) => !(m.audios || []).some((a) => a.kind === "audio-description" || a.kind === "speech-optimized"));
+    const standard = media.filter((m) => !m.audios || !m.audios.length || m.audios.some(standardAudio));
     if (standard.length) media = standard;
     return media.filter((m) => m.url).map((m) => {
       const hls = /mpegurl/i.test(m.mimeType || "") || /\.m3u8/.test(m.url);
-      const lang = ((m.audios || [])[0] || {}).languageCode;
+      const audios = m.audios || [];
+      const normalAudios = audios.filter(standardAudio);
+      const audioLanguages = (normalAudios.length ? normalAudios : audios).map((a) => a.languageCode);
       return {
         name: "ARD",
-        title: [title(teaser), LANGS2[lang] || lang, m.forcedLabel, hls ? "HLS" : "MP4"].filter(Boolean).join(" \xB7 "),
+        videoTitle: title(teaser),
+        forcedLabel: m.forcedLabel,
+        format: hls ? "HLS" : "MP4",
+        audioLanguages,
         url: m.url.startsWith("//") ? "https:" + m.url : m.url,
         quality: hls ? "auto" : m.maxVResolutionPx ? `${m.maxVResolutionPx}p` : "auto",
         res: hls ? 1e5 : m.maxVResolutionPx || 0
@@ -255,9 +366,17 @@ function getStreams(tmdbId, mediaType, season, episode) {
     try {
       const meta = yield getMeta(tmdbId, mediaType);
       const teasers = mediaType === "tv" ? yield findEpisodes(meta, season || 1, episode || 1) : yield findMovie(meta);
-      const seen = {};
-      const streams = [].concat.apply([], yield Promise.all(teasers.map(streamsOf))).filter((s) => !seen[s.url] && (seen[s.url] = true)).sort((a, b) => b.res - a.res);
-      return streams.map((s) => ({ name: s.name, title: s.title, url: s.url, quality: s.quality }));
+      const byUrl = /* @__PURE__ */ new Map();
+      for (const stream of [].concat(...yield Promise.all(teasers.map((t) => streamsOf(t).catch(() => []))))) {
+        const existing = byUrl.get(stream.url);
+        if (existing) existing.audioLanguages.push(...stream.audioLanguages);
+        else byUrl.set(stream.url, stream);
+      }
+      return [...byUrl.values()].sort((a, b) => b.res - a.res).map((_a) => {
+        var _b = _a, { res, videoTitle, forcedLabel, format } = _b, s = __objRest(_b, ["res", "videoTitle", "forcedLabel", "format"]);
+        const lang = audioNames(s.audioLanguages).join(" / ") || s.audioLanguages[0];
+        return Object.assign(s, { title: [videoTitle, lang, forcedLabel, format].filter(Boolean).join(" \xB7 ") });
+      });
     } catch (e) {
       console.error(`[ARD] ${e.message}`);
     }

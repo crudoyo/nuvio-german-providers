@@ -1,3 +1,5 @@
+import { audioName, audioNames, isHls, playlistAudio } from './audio.js';
+
 export const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 // Nuvio on iOS closes the QuickJS runtime as soon as getStreams settles (or after its 60 s timeout); a fetch still
@@ -17,27 +19,64 @@ export function send(url, opts) {
 
 // Nuvio mobile/desktop show only `name` and `quality` (not `title`), Nuvio TV shows `name - quality` plus `title`,
 // so the language goes into the name and 'auto' becomes the stream format.
-const SUBBED = [[/ger(man)?[\s._-]*sub|untertitel deutsch/i, 'Original, dt. UT'], [/eng(lish)?[\s._-]*sub|untertitel englisch/i, 'Original, engl. UT']];
+const SUBBED = [
+    [/ger(man)?[\s._-]*sub|(?:untertitel|\bUT) deutsch|original, dt\. ut/i, 'Original, dt. UT'],
+    [/(?:eng(?:lish)?|\ben)[\s._-]*sub|(?:untertitel|\bUT) englisch|original, engl\. ut/i, 'Original, engl. UT'],
+];
 const LANGS = [[/japanisch, dt\. ut/i, 'Japanisch, dt. UT'], [/japanisch, engl\. ut/i, 'Japanisch, engl. UT']].concat(SUBBED, [
-    [/\bomu\b/i, 'OmU'], [/\bov\b/i, 'OV'], [/englisch|\ben\b/i, 'Englisch'], [/franz|\bfr\b/i, 'Französisch'], [/spanisch/i, 'Spanisch'],
-    [/japanisch/i, 'Japanisch'], [/deutsch|\bde\b/i, 'Deutsch']]);
+    [/\bomu\b/i, 'OmU'], [/\bov\b|\boriginalversion\b/i, 'OV'], [/\b(?:englisch|english|eng|en)\b/i, 'Englisch'],
+    [/franz|\bfr\b/i, 'Französisch'], [/spanisch/i, 'Spanisch'], [/japanisch/i, 'Japanisch'], [/deutsch|\bde\b/i, 'Deutsch']]);
 
 // stream URL -> the hoster's file name, where the hoster shows one. Sites like huhu.to file "…GerSub.720p…" under plain
 // German, so a file name that says "subbed" beats a title that only says German.
 export const fileNames = {};
 
-function decorate(s) {
-    const hit = LANGS.find(([re]) => re.test(s.title || ''));
+function titleLanguage(title) {
+    const [first, ...rest] = (title || '').split(' · ');
+    const labels = (audioName(first) ? [first, ...rest] : rest).join(' · ');
+    const hit = LANGS.find(([re]) => re.test(labels));
+    if (hit) return hit;
+    return LANGS.find(([re, lang]) => lang !== 'Englisch' && re.test(first));
+}
+
+function decorate({ audioLanguages, ...s }, detected) {
+    const hit = titleLanguage(s.title);
+    const audio = detected.length ? detected : audioNames(audioLanguages || []);
     let lang = hit ? hit[1] : 'Deutsch', title = s.title;
     const sub = SUBBED.find(([re]) => re.test(fileNames[s.url] || ''));
+    let subtitle = /UT|OmU/.test(lang) ? lang : '';
     if (sub && !/UT|OmU/.test(lang)) {
-        lang = sub[1];
+        subtitle = sub[1];
+        lang = subtitle;
         // Nuvio TV shows the title under the name, so it must not keep saying "Deutsch"
         title = hit ? title.replace(hit[0], lang) : [title, lang].filter(Boolean).join(' · ');
     }
-    const quality = s.quality && s.quality !== 'auto' ? s.quality : (/\.m3u8|\/hls|master/i.test(s.url) ? 'HLS' : 'MP4');
+    if (audio.length && (!subtitle || audio.includes('Englisch'))) {
+        lang = [audio.join(' / '), subtitle && subtitle.replace(/^Original, /, '')].filter(Boolean).join(', ');
+        if (detected.length) {
+            const parts = (title || '').split(' · ');
+            const index = parts.findIndex(part => audioName(part));
+            if (index >= 0) parts[index] = audio.join(' / ');
+            else parts.push(audio.join(' / '));
+            title = parts.filter(Boolean).join(' · ');
+        }
+    }
+    const quality = s.quality && s.quality !== 'auto' ? s.quality : (isHls(s) || /\/hls|master/i.test(s.url) ? 'HLS' : 'MP4');
     const host = ((s.title || '').split(' · ')[0].match(/^[\w-]+\.[a-z]{2,}$/) || [])[0];
     return { lang, stream: Object.assign({}, s, { name: [s.name, lang, host].filter(Boolean).join(' · '), title, quality }) };
+}
+
+async function detectEnglishAudio(streams) {
+    const playlists = new Map();
+    return Promise.all(streams.map(async s => {
+        if (!isHls(s) || audioNames(s.audioLanguages || []).includes('Englisch') || (titleLanguage(s.title) || [])[1] === 'Englisch') return [];
+        const key = JSON.stringify([s.url, s.headers]);
+        if (!playlists.has(key)) {
+            playlists.set(key, getText(s.url, { headers: s.headers }).then(playlistAudio).catch(() => []));
+        }
+        const audio = await playlists.get(key);
+        return audio.includes('Englisch') ? audio : [];
+    }));
 }
 
 export function provider(getStreams) {
@@ -52,10 +91,11 @@ export function provider(getStreams) {
             } catch (e) {
                 console.error(e.message);
             }
+            const audio = await detectEnglishAudio(streams);
             if (running) await new Promise(resolve => idle.push(resolve));
             // German dub first, then German subtitles, then the rest; within a group the provider's own order stays
-            const rank = lang => (lang === 'Deutsch' ? 0 : /dt\. UT|OmU/.test(lang) ? 1 : 2);
-            return streams.map(decorate).map((d, i) => [rank(d.lang), i, d.stream]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(d => d[2]);
+            const rank = lang => (/^Deutsch(?:$| \/)/.test(lang) ? 0 : /dt\. UT|OmU/.test(lang) ? 1 : 2);
+            return streams.map((s, i) => decorate(s, audio[i])).map((d, i) => [rank(d.lang), i, d.stream]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(d => d[2]);
         },
     };
 }

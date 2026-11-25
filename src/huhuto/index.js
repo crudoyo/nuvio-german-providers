@@ -1,4 +1,5 @@
 import { request, getJson, provider } from '../../shared/http.js';
+import { audioNames, interleave } from '../../shared/audio.js';
 import { resolveEmbed } from '../../shared/extractors/index.js';
 
 const BASE = 'https://huhu.to';
@@ -18,6 +19,7 @@ async function resolve(src) {
     return (await resolveEmbed(url, `${BASE}/`)).map(s => ({
         name: 'Huhu',
         title: `${s.host} · ${(src.languages || ['de']).map(l => LANG[l] || l.toUpperCase()).join('/')}`,
+        audioLanguages: src.languages,
         url: s.url,
         quality: /\d/.test(s.quality) ? s.quality : (/^\d{3,4}p$/.test(src.quality) ? src.quality : 'auto'),
         headers: s.headers,
@@ -26,10 +28,17 @@ async function resolve(src) {
 
 async function getStreams(tmdbId, mediaType, season, episode) {
     try {
-        // German sources first: Nuvio TV runs a plugin's requests one after the other
-        const german = s => ((s.languages || ['de']).includes('de') ? 0 : 1);
-        const list = (await sources(tmdbId, mediaType, season, episode)).filter(s => s.url).sort((a, b) => german(a) - german(b));
-        return [].concat(...await Promise.all(list.map(s => resolve(s).catch(() => []))));
+        // Keep the first links for both languages near the start on TV, where fetch is synchronous.
+        const german = [], english = [], other = [];
+        for (const src of await sources(tmdbId, mediaType, season, episode)) {
+            if (!src.url) continue;
+            const audio = audioNames(src.languages || ['de']);
+            if (audio.includes('Englisch')) english.push(src);
+            else if (audio.includes('Deutsch')) german.push(src);
+            else other.push(src);
+        }
+        const ordered = interleave(german, english).concat(other);
+        return [].concat(...await Promise.all(ordered.map(s => resolve(s).catch(() => []))));
     } catch (e) {
         console.error(`[Huhu] ${e.message}`);
     }

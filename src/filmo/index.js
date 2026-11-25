@@ -1,4 +1,5 @@
 import { getText, request, UA, send, provider } from '../../shared/http.js';
+import { audioNames } from '../../shared/audio.js';
 import { getMeta } from '../../shared/tmdb.js';
 import { norm, pickBest } from '../../shared/match.js';
 import { load, all } from '../../shared/dom.js';
@@ -49,18 +50,29 @@ async function getStreams(tmdbId, mediaType) {
             if (hit) break;
         }
         if (!hit) return [];
-        const seen = {};
-        const chips = all(hit.$, '.provider-chip').filter(c => {
-            const id = c.attr('data-movie-link-id') || c.attr('data-p');
-            return seen[id] ? false : (seen[id] = true);
-        });
-        const out = await Promise.all(chips.map(async chip => {
+        const mirrors = new Map();
+        function addChip(chip, lang) {
+            const payload = chip.attr('data-p');
+            if (!payload) return;
+            const id = chip.attr('data-movie-link-id') || payload;
+            // Filmo lists some mirror IDs in both language rows. Keep both labels on that mirror.
+            if (!mirrors.has(id)) mirrors.set(id, { chip, languages: [] });
+            if (lang) mirrors.get(id).languages.push(lang);
+        }
+        for (const row of all(hit.$, '.provider-row')) {
+            const lang = row.find('.provider-row__lang').text().trim();
+            for (const chip of all(hit.$, '.provider-chip', row)) addChip(chip, lang);
+        }
+        for (const chip of all(hit.$, '.provider-chip')) addChip(chip);
+
+        const out = await Promise.all([...mirrors.values()].map(async ({ chip, languages }) => {
             const label = chip.text().replace(/\s+/g, ' ').trim();
             try {
                 const embed = await embedUrl(chip.attr('data-p'), hit.cookies);
                 return (await resolveEmbed(embed, BASE + '/')).map(s => {
                     const q = s.quality !== 'auto' ? s.quality : ((label.match(/\d{3,4}p/) || [])[0] || 'auto');
-                    return { name: 'Filmo', title: `${s.host} · ${label}`, url: s.url, quality: q, headers: s.headers };
+                    const title = [s.host, audioNames(languages).join(' / '), label].filter(Boolean).join(' · ');
+                    return { name: 'Filmo', title, audioLanguages: languages, url: s.url, quality: q, headers: s.headers };
                 });
             } catch (e) {
                 console.error(`[Filmo] ${label}: ${e.message}`);

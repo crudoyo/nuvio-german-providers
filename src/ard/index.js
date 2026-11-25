@@ -1,10 +1,12 @@
 import { getJson, provider } from '../../shared/http.js';
+import { audioNames } from '../../shared/audio.js';
 import { getMeta } from '../../shared/tmdb.js';
 import { pickBest, norm } from '../../shared/match.js';
 
 const API = 'https://api.ardmediathek.de';
 const ACCESSIBLE = /Audiodeskription|Gebärdensprache|Klare Sprache/i;
-const LANGS = { deu: 'Deutsch', eng: 'Englisch', fra: 'Französisch', ov: 'OV' };
+const VERSION_SUFFIX = /\s*[-–:]?\s*(?:\((?:OV|OmU|Originalversion|Englisch)\)|\bOriginalversion)\s*$/i;
+const standardAudio = a => a.kind !== 'audio-description' && a.kind !== 'speech-optimized';
 
 const title = t => (t.shortTitle || t.longTitle || t.title || '').trim();
 const targetId = t => ((t.links || {}).target || {}).id || t.id;
@@ -72,8 +74,9 @@ async function findMovie(meta) {
     for (const q of meta.titles) {
         // films of editorial collections ("Filme in der ARD") only show up as vods; the duration check drops clips/reports
         const vods = (await search('vods', q)).filter(t => t.coreAssetType === 'EPISODE' && t.duration >= 3000 && !ACCESSIBLE.test(title(t)));
-        const hit = pickBest(vods.map(t => ({ title: title(t), t })), meta);
-        if (hit) return [hit.t];
+        const items = vods.map(t => ({ title: title(t).replace(VERSION_SUFFIX, ''), t }));
+        const hit = pickBest(items, meta);
+        if (hit) return items.filter(i => norm(i.title) === norm(hit.title)).map(i => i.t);
     }
     return [];
 }
@@ -84,14 +87,19 @@ async function streamsOf(teaser) {
     const embedded = player && player.mediaCollection && player.mediaCollection.embedded;
     if (!embedded) return [];
     let media = [].concat.apply([], (embedded.streams || []).map(s => s.media || []));
-    const standard = media.filter(m => !(m.audios || []).some(a => a.kind === 'audio-description' || a.kind === 'speech-optimized'));
+    const standard = media.filter(m => !m.audios || !m.audios.length || m.audios.some(standardAudio));
     if (standard.length) media = standard;
     return media.filter(m => m.url).map(m => {
         const hls = /mpegurl/i.test(m.mimeType || '') || /\.m3u8/.test(m.url);
-        const lang = ((m.audios || [])[0] || {}).languageCode;
+        const audios = m.audios || [];
+        const normalAudios = audios.filter(standardAudio);
+        const audioLanguages = (normalAudios.length ? normalAudios : audios).map(a => a.languageCode);
         return {
             name: 'ARD',
-            title: [title(teaser), LANGS[lang] || lang, m.forcedLabel, hls ? 'HLS' : 'MP4'].filter(Boolean).join(' · '),
+            videoTitle: title(teaser),
+            forcedLabel: m.forcedLabel,
+            format: hls ? 'HLS' : 'MP4',
+            audioLanguages,
             url: m.url.startsWith('//') ? 'https:' + m.url : m.url,
             quality: hls ? 'auto' : m.maxVResolutionPx ? `${m.maxVResolutionPx}p` : 'auto',
             res: hls ? 1e5 : m.maxVResolutionPx || 0,
@@ -103,11 +111,17 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     try {
         const meta = await getMeta(tmdbId, mediaType);
         const teasers = mediaType === 'tv' ? await findEpisodes(meta, season || 1, episode || 1) : await findMovie(meta);
-        const seen = {};
-        const streams = [].concat.apply([], await Promise.all(teasers.map(streamsOf)))
-            .filter(s => !seen[s.url] && (seen[s.url] = true))
-            .sort((a, b) => b.res - a.res);
-        return streams.map(s => ({ name: s.name, title: s.title, url: s.url, quality: s.quality }));
+        const byUrl = new Map();
+        for (const stream of [].concat(...await Promise.all(teasers.map(t => streamsOf(t).catch(() => []))))) {
+            const existing = byUrl.get(stream.url);
+            if (existing) existing.audioLanguages.push(...stream.audioLanguages);
+            else byUrl.set(stream.url, stream);
+        }
+        return [...byUrl.values()].sort((a, b) => b.res - a.res)
+            .map(({ res, videoTitle, forcedLabel, format, ...s }) => {
+                const lang = audioNames(s.audioLanguages).join(' / ') || s.audioLanguages[0];
+                return Object.assign(s, { title: [videoTitle, lang, forcedLabel, format].filter(Boolean).join(' · ') });
+            });
     } catch (e) {
         console.error(`[ARD] ${e.message}`);
     }

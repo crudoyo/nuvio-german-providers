@@ -26,8 +26,8 @@ async function getStreams(tmdbId, mediaType, season, episode) {
 
         const streams = [];
         for (const [ns, lang] of [['de', 'Deutsch'], ['en', 'Englisch']]) {
-            const res = await getJson(`${TOPAZ}/mgid:arc:episode:shared.southpark.gsa.${ns}:${ep.id}/mica.json?clientPlatform=mobile`);
-            const src = res.stitchedstream && res.stitchedstream.source;
+            const res = await getJson(`${TOPAZ}/mgid:arc:episode:shared.southpark.gsa.${ns}:${ep.id}/mica.json?clientPlatform=mobile`).catch(() => null);
+            const src = res && res.stitchedstream && res.stitchedstream.source;
             if (src) streams.push({ name: 'South Park', title: `S${season}E${episode} ${ep.meta.subHeader || ''} · ${lang} · HLS`, url: src, quality: 'auto' });
         }
         return streams;

@@ -1,10 +1,12 @@
 import { getText, provider } from '../../shared/http.js';
+import { interleave } from '../../shared/audio.js';
 import { getMeta } from '../../shared/tmdb.js';
 import { load, all } from '../../shared/dom.js';
 import { resolveEmbed } from '../../shared/extractors/index.js';
 import { bySlug, followRedirect, pickSeries, splitSeasonPath } from './common.js';
 
 const BASE = 'https://serienstream.to';
+const AUDIO = { 1: 'Deutsch', 2: 'Englisch', 3: 'Original, dt. UT' };
 
 async function getStreams(tmdbId, mediaType, season, episode) {
     if (mediaType !== 'tv' || season == null || episode == null) return [];
@@ -25,7 +27,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             // "Provider" links always answer 410
             const links = all($, '.link-wrapper button').filter(b => b.attr('data-provider-name') !== 'Provider').map(b => ({
                 url: b.attr('data-play-url'), lang: b.attr('data-language-label'), langId: b.attr('data-language-id'),
-            }));
+            })).filter(l => l.url);
             return { epUrl, links };
         };
         let page = await episodePage(`${series.link}/staffel-${season}/episode-${episode}`);
@@ -34,18 +36,26 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             if (split) page = await episodePage(split);
         }
         const { epUrl, links } = page;
-        // s.to shows a captcha instead of redirecting after ~10 links per IP, so spend links on German first
-        // (1 = Deutsch, 3 = Ger-Sub, 2 = Englisch) and only fall back to the next language if nothing played
-        for (const langId of ['1', '3', '2']) {
-            const out = await Promise.all(links.filter(l => l.langId === langId).map(async l => {
-                const embed = await followRedirect(BASE + l.url, epUrl).catch(() => null);
-                return (await resolveEmbed(embed, epUrl)).map(s => ({
-                    name: 'Serienstream', title: `${s.host} · ${l.lang}`, url: s.url, quality: s.quality, headers: s.headers,
-                }));
+        const resolve = async l => {
+            const embed = await followRedirect(BASE + l.url, epUrl).catch(() => null);
+            return (await resolveEmbed(embed, epUrl)).map(s => ({
+                name: 'Serienstream', title: `${s.host} · ${AUDIO[l.langId] || l.lang}`,
+                url: s.url, quality: s.quality, headers: s.headers,
             }));
-            const streams = [].concat(...out);
-            if (streams.length) return streams;
+        };
+
+        const german = links.filter(l => l.langId === '1');
+        const english = links.filter(l => l.langId === '2');
+        const subbed = links.filter(l => l.langId === '3');
+        const primary = german.length ? german : subbed;
+        // Alternate languages so English gets a chance before the site's redirect CAPTCHA kicks in.
+        const preferred = interleave(primary, english);
+        const resolved = await Promise.all(preferred.map(resolve));
+        const streams = [].concat(...resolved);
+        if (german.length && !preferred.some((l, i) => l.langId === '1' && resolved[i].length)) {
+            streams.push(...[].concat(...await Promise.all(subbed.map(resolve))));
         }
+        return streams;
     } catch (e) {
         console.error(`[Serienstream] ${e.message}`);
     }

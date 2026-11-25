@@ -1,3 +1,18 @@
+var __getOwnPropSymbols = Object.getOwnPropertySymbols;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __propIsEnum = Object.prototype.propertyIsEnumerable;
+var __objRest = (source, exclude) => {
+  var target = {};
+  for (var prop in source)
+    if (__hasOwnProp.call(source, prop) && exclude.indexOf(prop) < 0)
+      target[prop] = source[prop];
+  if (source != null && __getOwnPropSymbols)
+    for (var prop of __getOwnPropSymbols(source)) {
+      if (exclude.indexOf(prop) < 0 && __propIsEnum.call(source, prop))
+        target[prop] = source[prop];
+    }
+  return target;
+};
 var __async = (__this, __arguments, generator) => {
   return new Promise((resolve2, reject) => {
     var fulfilled = (value) => {
@@ -19,6 +34,64 @@ var __async = (__this, __arguments, generator) => {
   });
 };
 
+// shared/audio.js
+var NAMES = {
+  de: "Deutsch",
+  deu: "Deutsch",
+  ger: "Deutsch",
+  german: "Deutsch",
+  deutsch: "Deutsch",
+  en: "Englisch",
+  eng: "Englisch",
+  english: "Englisch",
+  englisch: "Englisch",
+  fr: "Franz\xF6sisch",
+  fra: "Franz\xF6sisch",
+  fre: "Franz\xF6sisch",
+  french: "Franz\xF6sisch",
+  franz\u00F6sisch: "Franz\xF6sisch",
+  es: "Spanisch",
+  spa: "Spanisch",
+  spanish: "Spanisch",
+  spanisch: "Spanisch",
+  ja: "Japanisch",
+  jpn: "Japanisch",
+  jp: "Japanisch",
+  japanese: "Japanisch",
+  japanisch: "Japanisch"
+};
+function audioName(value) {
+  const code = String(value || "").trim().toLowerCase().replace(/^([a-z]{2,3})[-_][a-z]{2,4}(?:[-_].*)?$/, "$1");
+  return Object.prototype.hasOwnProperty.call(NAMES, code) ? NAMES[code] : "";
+}
+function audioNames(values) {
+  return [...new Set(values.map(audioName).filter(Boolean))].sort((a, b) => (b === "Deutsch") - (a === "Deutsch"));
+}
+function interleave(first, second) {
+  const items = [];
+  for (let i = 0; i < Math.max(first.length, second.length); i++) {
+    if (i < first.length) items.push(first[i]);
+    if (i < second.length) items.push(second[i]);
+  }
+  return items;
+}
+function isHls(stream) {
+  return /\.m3u8(?:[?#/]|$)|\/hls[/?]|\/master\.txt(?:[?#]|$)/i.test(stream.url) || /(?:^| · )HLS$/i.test(stream.title || "");
+}
+function attributes(line) {
+  const out = {};
+  line.replace(/([A-Z0-9-]+)=(?:"([^"]*)"|([^,]*))/g, (_, key, quoted, plain) => {
+    out[key] = quoted === void 0 ? plain : quoted;
+  });
+  return out;
+}
+function playlistAudio(text) {
+  if (!/^#EXTM3U\s/.test(text.trim())) return [];
+  const lines = text.split(/\r?\n/);
+  const groups = new Set(lines.filter((l) => l.startsWith("#EXT-X-STREAM-INF:")).map((l) => attributes(l).AUDIO).filter(Boolean));
+  return audioNames(lines.filter((l) => l.startsWith("#EXT-X-MEDIA:")).map(attributes).filter((a) => a.TYPE === "AUDIO" && (!groups.size || groups.has(a["GROUP-ID"])) && !/describes-video/i.test(a.CHARACTERISTICS || "") && !/audio description|audiodeskription/i.test(a.NAME || "")).map((a) => audioName(a.LANGUAGE) || (a.LANGUAGE && a.LANGUAGE !== "und" ? "" : audioName(a.NAME))));
+}
+
 // shared/http.js
 var UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 var DEADLINE_MS = 25e3;
@@ -39,28 +112,66 @@ function send(url, opts) {
     throw err;
   });
 }
-var SUBBED = [[/ger(man)?[\s._-]*sub|untertitel deutsch/i, "Original, dt. UT"], [/eng(lish)?[\s._-]*sub|untertitel englisch/i, "Original, engl. UT"]];
+var SUBBED = [
+  [/ger(man)?[\s._-]*sub|(?:untertitel|\bUT) deutsch|original, dt\. ut/i, "Original, dt. UT"],
+  [/(?:eng(?:lish)?|\ben)[\s._-]*sub|(?:untertitel|\bUT) englisch|original, engl\. ut/i, "Original, engl. UT"]
+];
 var LANGS = [[/japanisch, dt\. ut/i, "Japanisch, dt. UT"], [/japanisch, engl\. ut/i, "Japanisch, engl. UT"]].concat(SUBBED, [
   [/\bomu\b/i, "OmU"],
-  [/\bov\b/i, "OV"],
-  [/englisch|\ben\b/i, "Englisch"],
+  [/\bov\b|\boriginalversion\b/i, "OV"],
+  [/\b(?:englisch|english|eng|en)\b/i, "Englisch"],
   [/franz|\bfr\b/i, "Franz\xF6sisch"],
   [/spanisch/i, "Spanisch"],
   [/japanisch/i, "Japanisch"],
   [/deutsch|\bde\b/i, "Deutsch"]
 ]);
 var fileNames = {};
-function decorate(s) {
-  const hit = LANGS.find(([re]) => re.test(s.title || ""));
+function titleLanguage(title) {
+  const [first, ...rest] = (title || "").split(" \xB7 ");
+  const labels = (audioName(first) ? [first, ...rest] : rest).join(" \xB7 ");
+  const hit = LANGS.find(([re]) => re.test(labels));
+  if (hit) return hit;
+  return LANGS.find(([re, lang]) => lang !== "Englisch" && re.test(first));
+}
+function decorate(_a, detected) {
+  var _b = _a, { audioLanguages } = _b, s = __objRest(_b, ["audioLanguages"]);
+  const hit = titleLanguage(s.title);
+  const audio = detected.length ? detected : audioNames(audioLanguages || []);
   let lang = hit ? hit[1] : "Deutsch", title = s.title;
   const sub = SUBBED.find(([re]) => re.test(fileNames[s.url] || ""));
+  let subtitle = /UT|OmU/.test(lang) ? lang : "";
   if (sub && !/UT|OmU/.test(lang)) {
-    lang = sub[1];
+    subtitle = sub[1];
+    lang = subtitle;
     title = hit ? title.replace(hit[0], lang) : [title, lang].filter(Boolean).join(" \xB7 ");
   }
-  const quality2 = s.quality && s.quality !== "auto" ? s.quality : /\.m3u8|\/hls|master/i.test(s.url) ? "HLS" : "MP4";
+  if (audio.length && (!subtitle || audio.includes("Englisch"))) {
+    lang = [audio.join(" / "), subtitle && subtitle.replace(/^Original, /, "")].filter(Boolean).join(", ");
+    if (detected.length) {
+      const parts = (title || "").split(" \xB7 ");
+      const index = parts.findIndex((part) => audioName(part));
+      if (index >= 0) parts[index] = audio.join(" / ");
+      else parts.push(audio.join(" / "));
+      title = parts.filter(Boolean).join(" \xB7 ");
+    }
+  }
+  const quality2 = s.quality && s.quality !== "auto" ? s.quality : isHls(s) || /\/hls|master/i.test(s.url) ? "HLS" : "MP4";
   const host = ((s.title || "").split(" \xB7 ")[0].match(/^[\w-]+\.[a-z]{2,}$/) || [])[0];
   return { lang, stream: Object.assign({}, s, { name: [s.name, lang, host].filter(Boolean).join(" \xB7 "), title, quality: quality2 }) };
+}
+function detectEnglishAudio(streams) {
+  return __async(this, null, function* () {
+    const playlists = /* @__PURE__ */ new Map();
+    return Promise.all(streams.map((s) => __async(null, null, function* () {
+      if (!isHls(s) || audioNames(s.audioLanguages || []).includes("Englisch") || (titleLanguage(s.title) || [])[1] === "Englisch") return [];
+      const key = JSON.stringify([s.url, s.headers]);
+      if (!playlists.has(key)) {
+        playlists.set(key, getText(s.url, { headers: s.headers }).then(playlistAudio).catch(() => []));
+      }
+      const audio = yield playlists.get(key);
+      return audio.includes("Englisch") ? audio : [];
+    })));
+  });
 }
 function provider(getStreams2) {
   return {
@@ -74,9 +185,10 @@ function provider(getStreams2) {
         } catch (e) {
           console.error(e.message);
         }
+        const audio = yield detectEnglishAudio(streams);
         if (running) yield new Promise((resolve2) => idle.push(resolve2));
-        const rank = (lang) => lang === "Deutsch" ? 0 : /dt\. UT|OmU/.test(lang) ? 1 : 2;
-        return streams.map(decorate).map((d, i) => [rank(d.lang), i, d.stream]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((d) => d[2]);
+        const rank = (lang) => /^Deutsch(?:$| \/)/.test(lang) ? 0 : /dt\. UT|OmU/.test(lang) ? 1 : 2;
+        return streams.map((s, i) => decorate(s, audio[i])).map((d, i) => [rank(d.lang), i, d.stream]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((d) => d[2]);
       });
     }
   };
@@ -104,31 +216,6 @@ var postForm = (url, form, opts = {}) => getText(url, Object.assign({}, opts, {
   body: Object.keys(form).map((k) => encodeURIComponent(k) + "=" + encodeURIComponent(form[k])).join("&"),
   headers: Object.assign({ "Content-Type": "application/x-www-form-urlencoded" }, opts.headers)
 }));
-
-// shared/tmdb.js
-function getMeta(tmdbId, mediaType) {
-  return __async(this, null, function* () {
-    const type = mediaType === "tv" ? "tv" : "movie";
-    const d = yield getJson(`https://api.themoviedb.org/3/${type}/${tmdbId}?api_key=${globalThis.TMDB_API_KEY}&language=de-DE&append_to_response=external_ids,translations,alternative_titles`);
-    const tr = (d.translations || {}).translations || [];
-    const en = tr.find((t) => t.iso_639_1 === "en" && t.iso_3166_1 === "US") || tr.find((t) => t.iso_639_1 === "en");
-    const alts = ((d.alternative_titles || {}).titles || (d.alternative_titles || {}).results || []).filter((a) => a.iso_3166_1 === "DE" || a.iso_3166_1 === "AT").map((a) => a.title);
-    const title = d.title || d.name;
-    const originalTitle = d.original_title || d.original_name;
-    const englishTitle = en && (en.data.title || en.data.name);
-    const date = d.release_date || d.first_air_date || "";
-    return {
-      tmdbId: String(tmdbId),
-      type,
-      title,
-      originalTitle,
-      englishTitle,
-      year: date ? Number(date.slice(0, 4)) : null,
-      imdbId: (d.external_ids || {}).imdb_id || d.imdb_id || null,
-      titles: [title, originalTitle, englishTitle].concat(alts).filter((t, i, a) => t && a.indexOf(t) === i)
-    };
-  });
-}
 
 // shared/extractors/util.js
 var origin = (url) => url.match(/^https?:\/\/[^/]+/)[0];
@@ -386,6 +473,7 @@ function resolve(src) {
     return (yield resolveEmbed(url, `${BASE}/`)).map((s) => ({
       name: "Huhu",
       title: `${s.host} \xB7 ${(src.languages || ["de"]).map((l) => LANG[l] || l.toUpperCase()).join("/")}`,
+      audioLanguages: src.languages,
       url: s.url,
       quality: /\d/.test(s.quality) ? s.quality : /^\d{3,4}p$/.test(src.quality) ? src.quality : "auto",
       headers: s.headers
@@ -395,9 +483,16 @@ function resolve(src) {
 function getStreams(tmdbId, mediaType, season, episode) {
   return __async(this, null, function* () {
     try {
-      const german = (s) => (s.languages || ["de"]).includes("de") ? 0 : 1;
-      const list = (yield sources(tmdbId, mediaType, season, episode)).filter((s) => s.url).sort((a, b) => german(a) - german(b));
-      return [].concat(...yield Promise.all(list.map((s) => resolve(s).catch(() => []))));
+      const german = [], english = [], other = [];
+      for (const src of yield sources(tmdbId, mediaType, season, episode)) {
+        if (!src.url) continue;
+        const audio = audioNames(src.languages || ["de"]);
+        if (audio.includes("Englisch")) english.push(src);
+        else if (audio.includes("Deutsch")) german.push(src);
+        else other.push(src);
+      }
+      const ordered = interleave(german, english).concat(other);
+      return [].concat(...yield Promise.all(ordered.map((s) => resolve(s).catch(() => []))));
     } catch (e) {
       console.error(`[Huhu] ${e.message}`);
     }

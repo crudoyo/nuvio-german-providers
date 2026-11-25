@@ -1,4 +1,5 @@
 import { getText, getJson, provider } from '../../shared/http.js';
+import { audioNames } from '../../shared/audio.js';
 import { getMeta } from '../../shared/tmdb.js';
 import { pickBest } from '../../shared/match.js';
 
@@ -54,14 +55,21 @@ async function getStreams(tmdbId, mediaType, season, episode) {
 
         const attrs = (await getJson(`https://api.arte.tv/api/player/v2/config/de/${programId}`)).data.attributes;
         return (attrs.streams || [])
-            .map(s => ({ s, v: s.versions[0] || {} }))
-            .sort((a, b) => (b.v.audioLanguage === 'de') - (a.v.audioLanguage === 'de'))
-            .map(({ s, v }) => ({
-                name: 'Arte',
-                title: `${attrs.metadata.title}${attrs.metadata.subtitle ? ' - ' + attrs.metadata.subtitle : ''} · ${v.audioLanguage === 'de' ? 'Deutsch' : v.shortLabel || v.label} · HLS`,
-                url: s.url,
-                quality: 'auto', // multi-bitrate master, mainQuality understates it
-            }));
+            .filter(s => s.url)
+            .map(s => {
+                const versions = s.versions || [];
+                const v = versions[0] || {};
+                const audioLanguages = versions.filter(v => !v.audioDescription).map(v => v.audioLanguage);
+                const audio = audioNames(audioLanguages);
+                const english = audio.includes('Englisch');
+                const language = english ? audio.join(' / ') : (v.audioLanguage === 'de' ? 'Deutsch' : v.shortLabel || v.label);
+                const title = [attrs.metadata.title, attrs.metadata.subtitle].filter(Boolean).join(' - ');
+                return {
+                    name: 'Arte', title: [title, language, 'HLS'].filter(Boolean).join(' · '), url: s.url,
+                    audioLanguages: english ? audioLanguages : [],
+                    quality: 'auto', // multi-bitrate master, mainQuality understates it
+                };
+            });
     } catch (e) {
         console.error(`[Arte] ${e.message}`);
     }

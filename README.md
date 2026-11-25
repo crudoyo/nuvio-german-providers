@@ -17,6 +17,8 @@ In Nuvio in den Plugin-Einstellungen ein Repository mit der **rohen** URL der `m
 https://raw.githubusercontent.com/crudoyo/nuvio-german-providers/refs/heads/main/manifest.json
 ```
 
+Englische Tonspuren werden bei verfügbaren Titeln zusätzlich angezeigt. Bei **Deutsch / Englisch**
+liegen beide Tonspuren im selben Stream und lassen sich im Nuvio-Player auswählen.
 
 ## Provider
 
@@ -39,6 +41,14 @@ https://raw.githubusercontent.com/crudoyo/nuvio-german-providers/refs/heads/main
 GPL-3.0-or-later. Seiten-Logik nach [Bnyro/GermanProviders](https://github.com/Bnyro/GermanProviders) (GPL-3.0),
 Hoster-Decoder nach [recloudstream/cloudstream](https://github.com/recloudstream/cloudstream) (GPL-3.0).
 Die Plugins hosten keine Inhalte, sie verhalten sich wie ein Browser, der öffentlich erreichbare Seiten aufruft.
+
+## Englischer Ton (1.0.12)
+
+- **SerienStream** fragt deutsche und englische Hoster für dieselbe Folge ab.
+- **Filmo, Huhu, Moflix, FilmFrei24, ARD und ARTE** übernehmen verfügbare Audiosprachen aus den Quellen.
+- **South Park** zeigt verfügbare Sprachversionen auch dann an, wenn der Abruf der jeweils anderen Version fehlschlägt.
+- Bei **HLS-Streams** werden auch englische Tonspuren erkannt, die im Stream selbst ausgewiesen sind.
+  Bei AniWorld bezieht sich „engl. UT“ weiterhin auf die Untertitel.
 
 ## Gezielte Änderungen dieses Forks (1.0.11)
 

@@ -39,6 +39,77 @@ assert.deepStrictEqual(jwplayer('sources: [{file:"/v.mp4",label:"720p"}]', 'http
     assert.deepStrictEqual(named.map(s => s.url.slice(-1)), ['5', '1', '2', '3', '4']);
     assert.strictEqual(named[2].title, 'voe.sx · Original, dt. UT');
 
+    const hlsHeaders = { Referer: 'https://provider.example/' };
+    let audioRequests = 0;
+    globalThis.fetch = async (url, options) => {
+        audioRequests++;
+        assert.strictEqual(options.headers.Referer, hlsHeaders.Referer);
+        if (url.endsWith('unavailable.m3u8')) return { ok: false, status: 403 };
+        const tracks = [
+            '#EXTM3U',
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="main",NAME="Deutsch",LANGUAGE="deu"',
+            '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="main",NAME="English",LANGUAGE="en"',
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="main",NAME="English AD",LANGUAGE="en",CHARACTERISTICS="public.accessibility.describes-video"',
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="unused",NAME="English",LANGUAGE="en"',
+            '#EXT-X-STREAM-INF:BANDWIDTH=1600000,AUDIO="main"',
+            'stream.m3u8',
+        ];
+        if (url.endsWith('dual.m3u8')) tracks.splice(2, 0, '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="main",NAME="English (UK)",LANGUAGE="en-GB"');
+        return { ok: true, text: async () => tracks.join('\n') };
+    };
+    const multiAudio = await provider(async () => ['dual.m3u8', 'dual.m3u8', 'subtitles.m3u8', 'unavailable.m3u8', 'movie.mp4'].map(path => ({
+        name: 'X', title: 'The English Patient · Deutsch', url: `https://video.example/${path}`, headers: hlsHeaders,
+    }))).getStreams('1', 'movie');
+    assert.strictEqual(audioRequests, 3);
+    assert.strictEqual(multiAudio.length, 5);
+    assert.ok(multiAudio.filter(s => s.url.endsWith('/dual.m3u8')).every(s => s.name === 'X · Deutsch / Englisch'));
+    assert.ok(multiAudio.filter(s => !s.url.endsWith('/dual.m3u8')).every(s => s.name === 'X · Deutsch'));
+
+    // Use the same entry point as Nuvio to confirm that a playable German mirror never hides English.
+    const serienstream = require('./providers/serienstream.js');
+    const button = (id, lang) => `<button data-provider-name="Test" data-play-url="/play/${lang}" data-language-id="${id}"></button>`;
+    const replies = new Map([
+        ['https://serienstream.to/suche?term=Example&tab=shows', '<a class="show-cover" href="/serie/example"><img alt="Example"></a>'],
+        ['https://serienstream.to/serie/example/staffel-1/episode-1', `<div class="link-wrapper">${button(1, 'de')}${button(2, 'en')}</div>`],
+        ['https://media.example/embed/de', '<script>sources: [{file:"/de.mp4"}]</script>'],
+        ['https://media.example/embed/en', '<script>sources: [{file:"/en.mp4"}]</script>'],
+    ]);
+    globalThis.TMDB_API_KEY = 'fixture';
+    globalThis.fetch = async url => {
+        if (url.startsWith('https://api.themoviedb.org/3/tv/1?')) return { ok: true, text: async () => '{"name":"Example"}' };
+        if (url.startsWith('https://serienstream.to/play/')) return { ok: true, url: `https://media.example/embed/${url.split('/').pop()}` };
+        assert.ok(replies.has(url), url);
+        return { ok: true, text: async () => replies.get(url) };
+    };
+    const dubbed = await serienstream.getStreams('1', 'tv', 1, 1);
+    assert.deepStrictEqual(dubbed.map(s => s.name), ['Serienstream · Deutsch · media.example', 'Serienstream · Englisch · media.example']);
+
+    const filmo = require('./providers/filmo.js');
+    const row = (language, ids) => `<div class="provider-row"><span class="provider-row__lang">${language}</span>${
+        ids.map(id => `<div class="provider-chip" data-movie-link-id="${id}" data-p="${id}">Test 720p</div>`).join('')
+    }</div>`;
+    const filmoLookups = [];
+    globalThis.fetch = async (url, options) => {
+        let body, redirect = url;
+        if (url.startsWith('https://api.themoviedb.org/3/movie/1?')) body = '{"title":"Example"}';
+        else if (url === 'https://filmo.to/search?q=Example') body = '<a class="movie-poster-grid-card" href="/movies/example"><span class="card__title">Example</span></a>';
+        else if (url === 'https://filmo.to/movies/example') {
+            body = `<div class="primary-container"><h1>Example</h1></div>${row('English', ['both', 'en'])}${row('Deutsch', ['both', 'de'])}`;
+        } else if (url === 'https://filmo.to/n') {
+            const { p } = JSON.parse(options.body);
+            filmoLookups.push(p);
+            body = JSON.stringify({ x: p });
+        } else if (url.startsWith('https://filmo.to/n/')) redirect = url.replace('filmo.to/n/', 'media.example/embed/');
+        else if (url.startsWith('https://media.example/embed/')) body = `<script>sources: [{file:"/${url.split('/').pop()}.mp4"}]</script>`;
+        else assert.fail(url);
+        return { ok: true, url: redirect, headers: { get: () => '' }, text: async () => body };
+    };
+    const filmoStreams = await filmo.getStreams('1', 'movie');
+    assert.deepStrictEqual(filmoLookups.sort(), ['both', 'de', 'en']);
+    assert.deepStrictEqual(filmoStreams.map(s => s.name).sort(), [
+        'Filmo · Deutsch / Englisch · media.example', 'Filmo · Deutsch · media.example', 'Filmo · Englisch · media.example',
+    ]);
+
     // Dood only ever answers with a Cloudflare challenge, so it must not cost a request
     let asked = 0;
     globalThis.fetch = async () => { asked++; return { ok: false, status: 403 }; };
