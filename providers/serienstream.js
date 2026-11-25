@@ -242,6 +242,27 @@ function getMeta(tmdbId, mediaType) {
   });
 }
 
+// shared/match.js
+function norm(s) {
+  s = String(s || "").toLowerCase();
+  if (s.normalize) s = s.normalize("NFD").replace(/[̀-ͯ]/g, "");
+  return s.replace(/ß/g, "ss").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
+}
+function score(title, year, meta) {
+  const t = norm(title);
+  if (!t) return 0;
+  let s = 0;
+  for (const m of meta.titles.map(norm)) {
+    if (t === m) s = Math.max(s, 3);
+    else if (m.length > 3 && (t.includes(m) || m.includes(t))) s = Math.max(s, 1);
+  }
+  if (year && meta.year) {
+    const d = Math.abs(Number(year) - meta.year);
+    s += d === 0 ? 2 : d === 1 ? 1 : -2;
+  }
+  return s;
+}
+
 // shared/dom.js
 var cheerio = require("cheerio");
 var load = (html) => cheerio.load(html);
@@ -487,27 +508,6 @@ function resolveEmbed(url, referer) {
   });
 }
 
-// shared/match.js
-function norm(s) {
-  s = String(s || "").toLowerCase();
-  if (s.normalize) s = s.normalize("NFD").replace(/[̀-ͯ]/g, "");
-  return s.replace(/ß/g, "ss").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
-}
-function score(title, year, meta) {
-  const t = norm(title);
-  if (!t) return 0;
-  let s = 0;
-  for (const m of meta.titles.map(norm)) {
-    if (t === m) s = Math.max(s, 3);
-    else if (m.length > 3 && (t.includes(m) || m.includes(t))) s = Math.max(s, 1);
-  }
-  if (year && meta.year) {
-    const d = Math.abs(Number(year) - meta.year);
-    s += d === 0 ? 2 : d === 1 ? 1 : -2;
-  }
-  return s;
-}
-
 // src/serienstream/common.js
 function followRedirect(url, referer) {
   return __async(this, null, function* () {
@@ -550,6 +550,23 @@ function bySlug(base, prefix, meta) {
 // src/serienstream/index.js
 var BASE = "https://serienstream.to";
 var AUDIO = { 1: "Deutsch", 2: "Englisch", 3: "Original, dt. UT" };
+var SERIES_SUFFIX = /\s+[-–]\s+(?:Realserie|Zeichentrickserie)$/i;
+function matchShow(items, meta) {
+  return __async(this, null, function* () {
+    const variants = items.filter((i) => SERIES_SUFFIX.test(i.title) && score(i.title.replace(SERIES_SUFFIX, ""), null, meta) >= 3);
+    if (!meta.imdbId || !variants.length) return pickSeries(items, meta, BASE);
+    const exact = items.filter((i) => score(i.title, null, meta) >= 3);
+    const candidates = new Map(exact.concat(variants).map((i) => [i.link, i]));
+    let fallback = null;
+    for (const item of candidates.values()) {
+      const html = yield getText(BASE + item.link).catch(() => "");
+      const imdb = (html.match(/imdb\.com\/title\/(tt\d+)/i) || [])[1];
+      if (imdb === meta.imdbId) return item;
+      if (!imdb && !fallback && exact.includes(item)) fallback = item;
+    }
+    return fallback;
+  });
+}
 function getStreams(tmdbId, mediaType, season, episode) {
   return __async(this, null, function* () {
     if (mediaType !== "tv" || season == null || episode == null) return [];
@@ -559,7 +576,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
       for (const q of meta.titles) {
         const $ = load(yield getText(`${BASE}/suche?term=${encodeURIComponent(q)}&tab=shows`, { headers: { Referer: `${BASE}/suche` } }));
         const items = all($, "a.show-cover").map((a) => ({ link: a.attr("href"), title: $("img", a).attr("alt") }));
-        if (series = yield pickSeries(items, meta, BASE)) break;
+        if (series = yield matchShow(items, meta)) break;
       }
       series = series || (yield bySlug(BASE, "/serie/", meta));
       if (!series) return [];

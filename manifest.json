@@ -1,6 +1,6 @@
 {
   "name": "AIO",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "Deutsch und, soweit verfügbar, Englisch für Nuvio – portiert von Bnyro/GermanProviders (CloudStream)",
   "author": "InvalidPandaa",
   "scrapers": [
@@ -176,7 +176,7 @@
       "id": "serienstream",
       "name": "Serienstream",
       "description": "Serien auf Deutsch, Englisch und mit deutschen Untertiteln von SerienStream (s.to)",
-      "version": "1.0.12",
+      "version": "1.0.13",
       "filename": "providers/serienstream.js",
       "supportedTypes": [
         "tv"

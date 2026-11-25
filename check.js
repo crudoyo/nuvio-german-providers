@@ -84,6 +84,35 @@ assert.deepStrictEqual(jwplayer('sources: [{file:"/v.mp4",label:"720p"}]', 'http
     const dubbed = await serienstream.getStreams('1', 'tv', 1, 1);
     assert.deepStrictEqual(dubbed.map(s => s.name), ['Serienstream · Deutsch · media.example', 'Serienstream · Englisch · media.example']);
 
+    const sharedTitle = 'Geschichten aus der Gruft';
+    const cover = (slug, title) => `<a class="show-cover" href="/serie/${slug}"><img alt="${title}"></a>`;
+    const real = 'geschichten-aus-der-gruft-realserie';
+    const animated = 'geschichten-aus-der-gruft';
+    const showSearch = cover(real, `${sharedTitle} - Realserie`) + cover(animated, sharedTitle);
+    const selected = [];
+    globalThis.fetch = async url => {
+        let body, redirect = url;
+        if (url.startsWith('https://api.themoviedb.org/3/tv/')) {
+            const imdb_id = url.includes('/2391?') ? 'tt0096708' : 'tt0122837';
+            body = JSON.stringify({ name: sharedTitle, external_ids: { imdb_id } });
+        } else if (url.startsWith('https://serienstream.to/suche?')) body = showSearch.repeat(2);
+        else if (url === `https://serienstream.to/serie/${real}`) body = '<a href="https://www.imdb.com/title/tt0096708/">IMDb</a>';
+        else if (url === `https://serienstream.to/serie/${animated}`) body = '<a href="https://www.imdb.com/title/tt0122837/">IMDb</a>';
+        else if (url.includes('/episode-')) {
+            selected.push(url);
+            body = `<div class="link-wrapper">${button(1, 'de')}</div>`;
+        } else if (url.endsWith('/play/de')) redirect = 'https://media.example/embed/de';
+        else if (url === 'https://media.example/embed/de') body = replies.get(url);
+        else assert.fail(url);
+        return { ok: true, url: redirect, text: async () => body };
+    };
+    await serienstream.getStreams('2391', 'tv', 2, 5);
+    await serienstream.getStreams('13455', 'tv', 1, 11);
+    assert.deepStrictEqual(selected, [
+        `https://serienstream.to/serie/${real}/staffel-2/episode-5`,
+        `https://serienstream.to/serie/${animated}/staffel-1/episode-11`,
+    ]);
+
     const filmo = require('./providers/filmo.js');
     const row = (language, ids) => `<div class="provider-row"><span class="provider-row__lang">${language}</span>${
         ids.map(id => `<div class="provider-chip" data-movie-link-id="${id}" data-p="${id}">Test 720p</div>`).join('')

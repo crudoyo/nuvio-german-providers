@@ -1,12 +1,32 @@
 import { getText, provider } from '../../shared/http.js';
 import { interleave } from '../../shared/audio.js';
 import { getMeta } from '../../shared/tmdb.js';
+import { score } from '../../shared/match.js';
 import { load, all } from '../../shared/dom.js';
 import { resolveEmbed } from '../../shared/extractors/index.js';
 import { bySlug, followRedirect, pickSeries, splitSeasonPath } from './common.js';
 
 const BASE = 'https://serienstream.to';
 const AUDIO = { 1: 'Deutsch', 2: 'Englisch', 3: 'Original, dt. UT' };
+const SERIES_SUFFIX = /\s+[-–]\s+(?:Realserie|Zeichentrickserie)$/i;
+
+async function matchShow(items, meta) {
+    const variants = items.filter(i => SERIES_SUFFIX.test(i.title)
+        && score(i.title.replace(SERIES_SUFFIX, ''), null, meta) >= 3);
+    if (!meta.imdbId || !variants.length) return pickSeries(items, meta, BASE);
+
+    // The site can distinguish a live-action and animated series with the same German title.
+    const exact = items.filter(i => score(i.title, null, meta) >= 3);
+    const candidates = new Map(exact.concat(variants).map(i => [i.link, i]));
+    let fallback = null;
+    for (const item of candidates.values()) {
+        const html = await getText(BASE + item.link).catch(() => '');
+        const imdb = (html.match(/imdb\.com\/title\/(tt\d+)/i) || [])[1];
+        if (imdb === meta.imdbId) return item;
+        if (!imdb && !fallback && exact.includes(item)) fallback = item;
+    }
+    return fallback;
+}
 
 async function getStreams(tmdbId, mediaType, season, episode) {
     if (mediaType !== 'tv' || season == null || episode == null) return [];
@@ -16,7 +36,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         for (const q of meta.titles) {
             const $ = load(await getText(`${BASE}/suche?term=${encodeURIComponent(q)}&tab=shows`, { headers: { Referer: `${BASE}/suche` } }));
             const items = all($, 'a.show-cover').map(a => ({ link: a.attr('href'), title: $('img', a).attr('alt') }));
-            if ((series = await pickSeries(items, meta, BASE))) break;
+            if ((series = await matchShow(items, meta))) break;
         }
         series = series || await bySlug(BASE, '/serie/', meta);
         if (!series) return [];
